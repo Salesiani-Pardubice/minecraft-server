@@ -1,0 +1,31 @@
+services:
+  mc:
+    image: itzg/minecraft-server
+    tty: true
+    stdin_open: true
+    ports:
+      - "25565:25565"
+    environment:
+      EULA: "true"
+      INIT_MEMORY: "1G"
+      MAX_MEMORY: "4G"
+      GUI: "false"
+      DIFFICULTY: "normal"
+      MAX_PLAYERS: 20
+      MAX_WORLD_SIZE: 10000
+      ANNOUNCE_PLAYER_ACHIEVEMENTS: "false"
+      ENABLE_COMMAND_BLOCK: "false"
+      GENERATE_STRUCTURES: "true"
+      MAX_BUILD_HEIGHT: 256
+      SPAWN_ANIMALS: "true"
+      SPAWN_MONSTERS: "true"
+      SPAWN_NPCS: "true"
+      VIEW_DISTANCE: 10
+      MODE: "survival"
+      SERVER_NAME: "Salesianska LAN party"
+      SERVER_PORT: 25565
+
+    volumes:
+      # attach the relative directory 'data' to the container's /data path
+      - ./data:/data
+
