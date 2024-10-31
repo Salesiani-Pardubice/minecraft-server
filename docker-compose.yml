@@ -1,14 +1,32 @@
 services:
-  mc:
+  tailscale-client:
+    image: tailscale/tailscale:latest
+    container_name: tailscale
+    hostname: tailscale-minecraft # This name will be the one on the tailscale network
+    environment:
+      TS_AUTHKEY: "${TS_AUTH_TOKEN}"
+      TS_STATE_DIR: "/var/lib/tailscale"
+      TS_USERSPACE: "FALSE" # If not using Auto-pause it can be set as true
+    volumes:
+      - ./ts-minecraft/state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - net_admin
+      - sys_module
+    restart: unless-stopped
+    # ports: # Not needed, tailscale is directly linking to the container.
+      # - "25565:25565"
+  minecraft-server:
     image: itzg/minecraft-server
+    network_mode: container:tailscale
     tty: true
     stdin_open: true
-    ports:
-      - "25565:25565"
+    # ports:
+    # - "25565:25565"
     environment:
       EULA: "true"
-      INIT_MEMORY: "1G"
-      MAX_MEMORY: "4G"
+      MEMORY: "4G"
+      TYPE: "PAPER"
       GUI: "false"
       DIFFICULTY: "normal"
       MAX_PLAYERS: 20
@@ -24,8 +42,10 @@ services:
       MODE: "survival"
       SERVER_NAME: "Salesianska LAN party"
       SERVER_PORT: 25565
-
+    restart: unless-stopped
     volumes:
-      # attach the relative directory 'data' to the container's /data path
-      - ./data:/data
+      - minecraftserver:/data
+
+volumes:
+  minecraftserver:
 

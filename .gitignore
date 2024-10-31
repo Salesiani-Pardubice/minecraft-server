@@ -1,2 +1,6 @@
 # volumes
-data/*
+mc-paper/*
+ts-minecraft/*
+
+# secrets
+.env
