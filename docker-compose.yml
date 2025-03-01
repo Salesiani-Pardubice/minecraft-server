@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   minecraft-server:
     image: itzg/minecraft-server
@@ -25,22 +27,20 @@ services:
       ENABLE_STATUS: "TRUE"
 
       # Start user configuration
-      # WHITELIST: |
-      #  user1
       OPS: |
         petrkucerak
       # End user configuration
-      
+
       # Start of autopause configuration
       ENABLE_AUTOPAUSE: "TRUE"
       MAX_TICK_TIME: "-1"
       AUTOPAUSE_TIMEOUT_INIT: "30"
       AUTOPAUSE_TIMEOUT_EST: "10"
       # End of autopause configuration
-      
+
     restart: unless-stopped
     volumes:
-      - minecraftserver:/data
+      - minecraftserver:/data  # Opravený volume
       - ./plugins:/data/plugins  # Složka pro pluginy
       - ./dynmap:/data/plugins/dynmap  # Složka pro Dynmap konfiguraci
     ports:
@@ -55,4 +55,5 @@ services:
       sh -c "wget -O /plugins/Dynmap.jar https://cdn.modrinth.com/data/fRQREgAc/versions/ewsTwo6L/Dynmap-3.7-beta-8-fabric-1.21.3.jar || exit 0"
     restart: "no"
 
-
+volumes:
+  minecraftserver:
