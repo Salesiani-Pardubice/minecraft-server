@@ -7,7 +7,7 @@ services:
       EULA: "true"
       MEMORY: "4G"
       TYPE: "PAPER"
-      VIEW_DISTANCE: 10
+      VIEW_DISTANCE: 14
 
       VERSION: "1.21.4"
       DIFFICULTY: "normal"
