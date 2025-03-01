@@ -38,10 +38,6 @@ services:
 
     restart: unless-stopped
     volumes:
-      - minecraftserver:/data  # Opravený volume
+      - ./data:/data
     ports:
       - "25565:25565"
-
-
-volumes:
-  minecraftserver:
