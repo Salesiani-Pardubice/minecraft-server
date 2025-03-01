@@ -7,3 +7,9 @@ Jedním ze salesiánských míst působnosti je i hřiště. Pro mnohé z nás t
 docker compose up -d # run in background
 ```
 
+## Snippety
+```sh
+docker container ls # list docker containers
+docker stop <CONTAINER ID> # stop container
+docker exec -i <CONTAINER ID> rcon-cli # open command terminal
+```
