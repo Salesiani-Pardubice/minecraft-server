@@ -8,6 +8,7 @@ services:
       MEMORY: "4G"
       TYPE: "PAPER"
       VIEW_DISTANCE: 14
+      GUI: "FALSE"
 
       VERSION: "1.21.4"
       DIFFICULTY: "normal"
@@ -15,6 +16,20 @@ services:
       SERVER_NAME: "Salosianska LAN party"
       ICON: "https://raw.githubusercontent.com/Salesiani-Pardubice/.github/refs/heads/main/assets/logotypes/logo-SDB-color.png"
       PVP: "true"
+
+      ENABLE_QUERY: "TRUE"
+      MAX_PLAYERS: 10
+      ENABLE_COMMAND_BLOCK: "TRUE"
+      ANNOUNCE_PLAYER_ACHIEVEMENTS: "TRUE"
+      ALLOW_FLIGHT: "TRUE"
+      ENABLE_STATUS: "TRUE"
+
+      # Start user configuration
+      # WHITELIST: |
+      #  user1
+      OPS: |
+        petrkucerak
+      # End user configuration
       
       # Start of autopause configuration
       ENABLE_AUTOPAUSE: "TRUE"
