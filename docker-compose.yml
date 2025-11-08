@@ -1,6 +1,9 @@
+version: "3.8"
+
 services:
   minecraft-server:
     image: itzg/minecraft-server
+    container_name: minecraft-server
     tty: true
     stdin_open: true
     environment:
@@ -9,35 +12,44 @@ services:
       TYPE: "PAPER"
       VIEW_DISTANCE: 14
       GUI: "FALSE"
-
       VERSION: "1.21.4"
       DIFFICULTY: "normal"
       MODE: "survival"
       SERVER_NAME: "Salosianska LAN party"
       ICON: "https://raw.githubusercontent.com/Salesiani-Pardubice/.github/refs/heads/main/assets/logotypes/logo-SDB-color.png"
       PVP: "true"
-
       ENABLE_QUERY: "TRUE"
       MAX_PLAYERS: 10
       ENABLE_COMMAND_BLOCK: "TRUE"
       ANNOUNCE_PLAYER_ACHIEVEMENTS: "TRUE"
       ALLOW_FLIGHT: "TRUE"
       ENABLE_STATUS: "TRUE"
-
-      # Start user configuration
       OPS: |
         petrkucerak
-      # End user configuration
-
-      # Start of autopause configuration
       ENABLE_AUTOPAUSE: "TRUE"
       MAX_TICK_TIME: "-1"
       AUTOPAUSE_TIMEOUT_INIT: "30"
       AUTOPAUSE_TIMEOUT_EST: "10"
-      # End of autopause configuration
-
-    restart: unless-stopped
     volumes:
       - ./data:/data
-    ports:
-      - "25565:25565"
+    restart: unless-stopped
+    networks:
+      - mcnet
+
+  playit-agent:
+    image: playitcloud/playit-agent:latest
+    container_name: playit-agent
+    restart: unless-stopped
+    networks:
+      - mcnet
+    # agent se spojí na mc server v docker síti
+    environment:
+      PLAYIT_SERVER_PORT: "25565"
+      PLAYIT_SERVER_HOST: "minecraft-server"
+    # pro první spuštění můžeš připojit terminál
+    # a odchytit linkovací URL (jen jednou!)
+    # command: ["playit", "--setup"]
+
+networks:
+  mcnet:
+    driver: bridge
