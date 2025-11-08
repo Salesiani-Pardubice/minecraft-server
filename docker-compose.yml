@@ -20,9 +20,9 @@ services:
       PVP: "true"
       ENABLE_QUERY: "TRUE"
       MAX_PLAYERS: 10
-      ENABLE_COMMAND_BLOCK: "TRUE"
+      ENABLE_COMMAND_BLOCK: "FALSE"
       ANNOUNCE_PLAYER_ACHIEVEMENTS: "TRUE"
-      ALLOW_FLIGHT: "TRUE"
+      ALLOW_FLIGHT: "FALSE"
       ENABLE_STATUS: "TRUE"
       OPS: |
         petrkucerak
