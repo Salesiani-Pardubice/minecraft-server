@@ -24,6 +24,8 @@ services:
       ANNOUNCE_PLAYER_ACHIEVEMENTS: "TRUE"
       ALLOW_FLIGHT: "FALSE"
       ENABLE_STATUS: "TRUE"
+      SPAWN_PROTECTION: "TRUE"
+      ONLINE_MODE: "TRUE"
       OPS: |
         petrkucerak
       ENABLE_AUTOPAUSE: "TRUE"
