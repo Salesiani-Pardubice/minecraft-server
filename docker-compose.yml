@@ -8,11 +8,12 @@ services:
     stdin_open: true
     environment:
       EULA: "true"
-      MEMORY: "4G"
+      MEMORY: "3G"                          # ↓ Reduced slightly for RPi headroom
       TYPE: "PAPER"
-      VIEW_DISTANCE: 14
+      VIEW_DISTANCE: 6                      # ↓ Critical: Reduced from 14 (way too high for RPi)
+      SIMULATION_DISTANCE: 6                # ← NEW: Matches view dist, reduces loaded chunks/activity
       GUI: "FALSE"
-      VERSION: "1.21.11"
+      VERSION: "LATEST"                     # Stays on newest (1.21.11+)
       DIFFICULTY: "normal"
       MODE: "survival"
       SERVER_NAME: "Salosianska LAN party"
@@ -28,14 +29,16 @@ services:
       ONLINE_MODE: "TRUE"
       OPS: |
         petrkucerak
-      ENABLE_AUTOPAUSE: "TRUE"
+      ENABLE_AUTOPAUSE: "FALSE"             # ← CRITICAL: Disabled (causes hangs on resume)
       MAX_TICK_TIME: "-1"
-      AUTOPAUSE_TIMEOUT_INIT: "30"
-      AUTOPAUSE_TIMEOUT_EST: "10"
+      # NEW optimizations for Paper/RPi:
+      MAX_WORLD_SIZE: 2000                  # ← Limits world size, prevents endless chunk gen
+      SPAWN_RADIUS: 4                       # ← Smaller spawn load
+      ENTITY_BROADCAST_RANGE_PERCENTAGE: 50 # ← Reduces entity tracking
     volumes:
       - ./data:/data
     ports:
-      - "25565:25565"           # ← important for playit.gg to be able to connect locally
+      - "25565:25565"
     restart: unless-stopped
     networks:
       - mcnet
@@ -43,11 +46,9 @@ services:
   playit:
     image: ghcr.io/playit-cloud/playit-agent:0.16
     container_name: playit-agent
-    network_mode: host           # ← required for playit.gg agent
+    network_mode: host
     environment:
       - SECRET_KEY=${SECRET_KEY}
-    # Alternative syntax using command (both work):
-    # command: --secret ${SECRET_KEY}
     restart: unless-stopped
 
 networks:
