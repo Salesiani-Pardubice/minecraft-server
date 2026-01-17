@@ -39,7 +39,7 @@ services:
         luckperms
         worldguard
         worldedit
-        coreprotect
+       # coreprotect
       VERSION_FROM_MODRINTH_PROJECTS: true
 
       
