@@ -8,12 +8,12 @@ services:
     stdin_open: true
     environment:
       EULA: "true"
-      MEMORY: "3G"                          # ↓ Reduced slightly for RPi headroom
+      MEMORY: "3G"
       TYPE: "PAPER"
-      VIEW_DISTANCE: 6                      # ↓ Critical: Reduced from 14 (way too high for RPi)
-      SIMULATION_DISTANCE: 6                # ← NEW: Matches view dist, reduces loaded chunks/activity
+      VIEW_DISTANCE: 6
+      SIMULATION_DISTANCE: 6
       GUI: "FALSE"
-      VERSION: "LATEST"                     # Stays on newest (1.21.11+)
+      VERSION: "LATEST"
       DIFFICULTY: "normal"
       MODE: "survival"
       SERVER_NAME: "Salosianska LAN party"
@@ -29,12 +29,52 @@ services:
       ONLINE_MODE: "TRUE"
       OPS: |
         petrkucerak
-      ENABLE_AUTOPAUSE: "FALSE"             # ← CRITICAL: Disabled (causes hangs on resume)
+      ENABLE_AUTOPAUSE: "FALSE"
       MAX_TICK_TIME: "-1"
-      # NEW optimizations for Paper/RPi:
-      MAX_WORLD_SIZE: 2000                  # ← Limits world size, prevents endless chunk gen
-      SPAWN_RADIUS: 4                       # ← Smaller spawn load
-      ENTITY_BROADCAST_RANGE_PERCENTAGE: 50 # ← Reduces entity tracking
+      MAX_WORLD_SIZE: 2000
+      SPAWN_RADIUS: 4
+      ENTITY_BROADCAST_RANGE_PERCENTAGE: 50
+      # NEW: Auto-download plugins on startup
+      INIT_EXTRA: |
+        #!/bin/bash
+        # Download plugins if not present
+        mkdir -p /data/plugins
+        cd /data/plugins
+
+        # LuckPerms
+        if [ ! -f "LuckPerms-Paper.jar" ]; then
+          curl -L -o LuckPerms-Paper.jar https://download.luckperms.net/latest/luckperms-paper.jar
+        fi
+
+        # WorldGuard
+        if [ ! -f "WorldGuard.jar" ]; then
+          curl -L -o WorldGuard.jar https://dev.bukkit.org/projects/worldguard/files/latest
+        fi
+
+        # WorldEdit
+        if [ ! -f "WorldEdit.jar" ]; then
+          curl -L -o WorldEdit.jar https://dev.bukkit.org/projects/worldedit/files/latest
+        fi
+
+        # CoreProtect
+        if [ ! -f "CoreProtect.jar" ]; then
+          curl -L -o CoreProtect.jar https://dev.bukkit.org/projects/coreprotect/files/latest
+        fi
+
+        # AdvancedBan
+        if [ ! -f "AdvancedBan.jar" ]; then
+          curl -L -o AdvancedBan.jar https://www.spigotmc.org/resources/advancedban.8695/download?version=latest
+        fi
+
+        # Matrix (Anti-Cheat)
+        if [ ! -f "Matrix.jar" ]; then
+          curl -L -o Matrix.jar https://www.spigotmc.org/resources/matrix-1-7-1-21-best-anti-cheat-1-8-8-1-21-combat-ai-detection.102359/download?version=latest
+        fi
+
+        # AntiVPN (optional, blocks proxies/VPNs)
+        if [ ! -f "AntiVPN.jar" ]; then
+          curl -L -o AntiVPN.jar https://www.spigotmc.org/resources/antivpn-block-vpns-proxies-bad-ips.58541/download?version=latest
+        fi
     volumes:
       - ./data:/data
     ports:
