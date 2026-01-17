@@ -12,7 +12,7 @@ services:
       TYPE: "PAPER"
       VIEW_DISTANCE: 14
       GUI: "FALSE"
-      VERSION: "1.21.4"
+      VERSION: "1.21.11"
       DIFFICULTY: "normal"
       MODE: "survival"
       SERVER_NAME: "Salosianska LAN party"
