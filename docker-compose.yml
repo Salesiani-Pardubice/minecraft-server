@@ -36,9 +36,9 @@ services:
       ENTITY_BROADCAST_RANGE_PERCENTAGE: 50
       USES_PLUGINS: true
       MODRINTH_PROJECTS: |
-        luckperms
-        worldguard
-        worldedit
+       # luckperms
+       # worldguard
+       # worldedit
        # coreprotect
       VERSION_FROM_MODRINTH_PROJECTS: true
 
