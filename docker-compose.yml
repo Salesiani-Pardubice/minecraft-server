@@ -35,7 +35,13 @@ services:
       SPAWN_RADIUS: 4
       ENTITY_BROADCAST_RANGE_PERCENTAGE: 50
       USES_PLUGINS: true
-      PLUGINS_FILE: /plugins.txt
+      MODRINTH_PROJECTS: |
+        luckperms
+        worldguard
+        worldedit
+        coreprotect
+      VERSION_FROM_MODRINTH_PROJECTS: true
+
       
     volumes:
       - ./data:/data
