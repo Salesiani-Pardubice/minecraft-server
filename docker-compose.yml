@@ -34,23 +34,21 @@ services:
       AUTOPAUSE_TIMEOUT_EST: "10"
     volumes:
       - ./data:/data
+    ports:
+      - "25565:25565"           # ← important for playit.gg to be able to connect locally
     restart: unless-stopped
     networks:
       - mcnet
 
-  playit-agent:
-    image: playitcloud/playit-agent:latest
+  playit:
+    image: ghcr.io/playit-cloud/playit-agent:0.16
     container_name: playit-agent
-    restart: unless-stopped
-    networks:
-      - mcnet
-    # agent se spojí na mc server v docker síti
+    network_mode: host           # ← required for playit.gg agent
     environment:
-      PLAYIT_SERVER_PORT: "25565"
-      PLAYIT_SERVER_HOST: "minecraft-server"
-    # pro první spuštění můžeš připojit terminál
-    # a odchytit linkovací URL (jen jednou!)
-    # command: ["playit", "--setup"]
+      - SECRET_KEY=${SECRET_KEY}
+    # Alternative syntax using command (both work):
+    # command: --secret ${SECRET_KEY}
+    restart: unless-stopped
 
 networks:
   mcnet:
