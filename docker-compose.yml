@@ -34,47 +34,9 @@ services:
       MAX_WORLD_SIZE: 2000
       SPAWN_RADIUS: 4
       ENTITY_BROADCAST_RANGE_PERCENTAGE: 50
-      # NEW: Auto-download plugins on startup
-      INIT_EXTRA: |
-        #!/bin/bash
-        # Download plugins if not present
-        mkdir -p /data/plugins
-        cd /data/plugins
-
-        # LuckPerms
-        if [ ! -f "LuckPerms-Paper.jar" ]; then
-          curl -L -o LuckPerms-Paper.jar https://download.luckperms.net/latest/luckperms-paper.jar
-        fi
-
-        # WorldGuard
-        if [ ! -f "WorldGuard.jar" ]; then
-          curl -L -o WorldGuard.jar https://dev.bukkit.org/projects/worldguard/files/latest
-        fi
-
-        # WorldEdit
-        if [ ! -f "WorldEdit.jar" ]; then
-          curl -L -o WorldEdit.jar https://dev.bukkit.org/projects/worldedit/files/latest
-        fi
-
-        # CoreProtect
-        if [ ! -f "CoreProtect.jar" ]; then
-          curl -L -o CoreProtect.jar https://dev.bukkit.org/projects/coreprotect/files/latest
-        fi
-
-        # AdvancedBan
-        if [ ! -f "AdvancedBan.jar" ]; then
-          curl -L -o AdvancedBan.jar https://www.spigotmc.org/resources/advancedban.8695/download?version=latest
-        fi
-
-        # Matrix (Anti-Cheat)
-        if [ ! -f "Matrix.jar" ]; then
-          curl -L -o Matrix.jar https://www.spigotmc.org/resources/matrix-1-7-1-21-best-anti-cheat-1-8-8-1-21-combat-ai-detection.102359/download?version=latest
-        fi
-
-        # AntiVPN (optional, blocks proxies/VPNs)
-        if [ ! -f "AntiVPN.jar" ]; then
-          curl -L -o AntiVPN.jar https://www.spigotmc.org/resources/antivpn-block-vpns-proxies-bad-ips.58541/download?version=latest
-        fi
+      USES_PLUGINS: true
+      PLUGINS_FILE: /plugins.txt
+      
     volumes:
       - ./data:/data
     ports:
