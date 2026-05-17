@@ -49,13 +49,9 @@ docker stats minecraft-server                 # live CPU / RAM usage
 docker inspect minecraft-server | grep Status # quick health check
 df -h                                         # disk space
 
-# Backups (manual)
-docker exec minecraft-server rcon-cli save-off
-tar -czf ~/backups/world-$(date +%Y%m%d-%H%M).tar.gz \
-  ~/Documents/minecraft-server/data/world \
-  ~/Documents/minecraft-server/data/world_nether \
-  ~/Documents/minecraft-server/data/world_the_end
-docker exec minecraft-server rcon-cli save-on
+# Backups (handled by the mc-backup sidecar — see "Backup strategy" below)
+docker compose logs -f mc-backup              # tail backup activity
+docker exec mc-backup backup now              # force an immediate backup
 ```
 
 ---
@@ -79,9 +75,12 @@ docker exec minecraft-server rcon-cli save-on
     of what is in `MODRINTH_PROJECTS`. To fully remove a plugin, delete **both** the
     env var entry and the jar.
 
-- **Paper version** is controlled by `VERSION: "LATEST"`, resolved at container start.
-  The exact resolved jar lives at `data/paper-*.jar` and is recorded in
-  `data/.papermc-manifest.json`.
+- **Versions are pinned.** Container images use exact tags
+  (`itzg/minecraft-server:2026.5.2-java21`, `itzg/mc-backup:2026.5.0`,
+  `playit-agent:0.16`) and `VERSION: "1.21.11"` pins the Paper build. Bumping
+  any of these is a deliberate edit in `docker-compose.yml` followed by
+  `docker compose pull && docker compose up -d`. The resolved Paper jar lives at
+  `data/paper-*.jar` and is recorded in `data/.papermc-manifest.json`.
 
 - **JVM tuning:** `USE_AIKAR_FLAGS: "true"` enables the community-standard GC flags for
   Paper servers. These significantly reduce garbage-collection pauses and should always
@@ -123,20 +122,29 @@ Recommended plugins to add (uncomment in compose):
 
 ## Backup strategy
 
-Worlds live in `data/` which is not committed to git. Schedule automatic backups
-with cron on the host:
+Worlds live in `data/` which is not committed to git. Backups are handled by the
+`mc-backup` sidecar (`itzg/mc-backup`) defined in `docker-compose.yml`, so they
+start automatically with `docker compose up -d` — **no host cron is required**.
+
+Behaviour:
+- Connects to the server over RCON (`RCON_HOST: minecraft-server`) to run
+  `save-off` / `save-all flush` / `save-on` around each archive.
+- Writes `world-*.tgz` archives to `/home/pedro/backups` on the host
+  (bind-mounted into the sidecar at `/backups`).
+- `BACKUP_INTERVAL: 24h` — one archive every 24 hours from container start
+  (after a `2m` `INITIAL_DELAY`). The schedule is interval-based, not
+  wall-clock; to anchor backups near 03:00, restart the stack at the desired
+  time of day.
+- `PRUNE_BACKUPS_DAYS: 14` — archives older than 14 days are removed
+  automatically.
+
+Useful commands:
 
 ```sh
-# Edit with: crontab -e
-# Daily backup at 03:00, keep 14 days
-0 3 * * * /home/pedro/Documents/minecraft-server/scripts/backup.sh >> /home/pedro/backups/backup.log 2>&1
+docker compose logs -f mc-backup              # tail backup activity
+docker exec mc-backup backup now              # force an immediate backup
+ls -lh /home/pedro/backups                    # list archives
 ```
-
-`scripts/backup.sh` should:
-1. Run `rcon-cli save-off` and `rcon-cli save-all` to flush chunks.
-2. `tar` the world directories.
-3. Run `rcon-cli save-on`.
-4. Delete archives older than 14 days (`find ~/backups -mtime +14 -delete`).
 
 ---
 

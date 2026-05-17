@@ -1,6 +1,6 @@
 services:
   minecraft-server:
-    image: itzg/minecraft-server
+    image: itzg/minecraft-server:2026.5.2-java21
     container_name: minecraft-server
     tty: true
     stdin_open: true
@@ -13,7 +13,7 @@ services:
       VIEW_DISTANCE: 6
       SIMULATION_DISTANCE: 6
       GUI: "FALSE"
-      VERSION: "LATEST"
+      VERSION: "1.21.11"
       DIFFICULTY: "normal"
       MODE: "survival"
       SERVER_NAME: "Salosianska LAN party"
@@ -47,6 +47,25 @@ services:
       - ./data:/data
     ports:
       - "25565:25565"
+    restart: unless-stopped
+    networks:
+      - mcnet
+
+  mc-backup:
+    image: itzg/mc-backup:2026.5.0
+    container_name: mc-backup
+    depends_on:
+      - minecraft-server
+    environment:
+      TZ: "Europe/Prague"
+      RCON_HOST: minecraft-server
+      INITIAL_DELAY: "2m"
+      BACKUP_INTERVAL: "24h"
+      PRUNE_BACKUPS_DAYS: "14"
+      BACKUP_NAME: "world"
+    volumes:
+      - ./data:/data:ro
+      - /home/pedro/backups:/backups
     restart: unless-stopped
     networks:
       - mcnet
