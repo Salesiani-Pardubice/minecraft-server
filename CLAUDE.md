@@ -6,8 +6,13 @@ This file provides guidance to Claude Code when working with this repository.
 
 A `docker-compose` setup that runs a **Paper Minecraft server** (`itzg/minecraft-server`)
 for Salesian LAN parties, exposed to the internet through a `playit-cloud/playit-agent`
-tunnel on `mc.salesianipardubice.cz`. There is no application code — the "source" is
-the compose file and the env-driven configuration it passes to the image.
+tunnel on `mc.salesianipardubice.cz`. The compose file plus its env-driven configuration
+is the core "source" for the Pi-side stack.
+
+A companion **web frontend** lives in [`web/`](./web/) (Astro + Tailwind + shadcn/ui,
+hosted on Cloudflare Pages, API in `web/functions/`). It is reconciled into the running
+MC server by the [`sync-agent/`](./sync-agent/) service. See "Web frontend & sync-agent"
+below for the boundary.
 
 ## Hardware
 
@@ -161,9 +166,51 @@ on `localhost:25565`.
 
 ---
 
+## Web frontend & sync-agent
+
+This repo contains two independently-deployed components beyond the Pi stack:
+
+- **[`web/`](./web/)** — Astro + Tailwind + shadcn/ui frontend deployed to
+  **Cloudflare Pages**. The API lives in `web/functions/` as Cloudflare Pages
+  Functions, backed by Cloudflare **D1**. Provides a public landing page,
+  email-magic-link auth, self-service whitelist requests (with admin approval),
+  operator management, player profiles/stats, and LAN-event registration.
+  Czech UI, English code.
+- **[`sync-agent/`](./sync-agent/)** — small Docker service that runs on the Pi
+  alongside `minecraft-server`. Polls the cloud's `/api/sync/desired-state`
+  every ~5 minutes, diffs against live MC state, and applies changes via RCON.
+
+**Design invariant — the web is purely additive.** The MC server must keep
+running normally if Cloudflare, D1, or the sync-agent fail. Control flow is
+**pull-based**: Cloudflare never connects to the Pi; the sync-agent only makes
+outbound HTTPS. Whitelist/op changes made through the web propagate to the
+server within one poll interval. Manual RCON / env-var changes on the Pi remain
+fully supported.
+
+Full design lives in [`web/ARCHITECTURE.md`](./web/ARCHITECTURE.md). API surface
+in [`web/functions/README.md`](./web/functions/README.md). Sync-agent details in
+[`sync-agent/README.md`](./sync-agent/README.md). All three are **templates**
+with `<!-- PASTE: ... -->` markers — extend them as the design firms up rather
+than starting from scratch.
+
+When making changes touching this feature, remember:
+- The `OPS:` env-var list in `docker-compose.yml` is the bootstrap; once the
+  sync-agent is running, ops are managed via the web and reconciled via RCON.
+  Both paths must stay compatible.
+- Add `SYNC_SECRET` and `RCON_PASSWORD` to the existing `.env` (gitignored)
+  when the sync-agent ships. The MC server needs `RCON_PASSWORD` set too.
+- `web/` has its own `package.json` and Node toolchain; the Pi side has none.
+  Don't pull web dependencies into the Pi services.
+
+---
+
 ## Conventions
 
-- The README and user-facing strings (server name, etc.) are in Czech. Keep them that way.
-- Operator list is managed via `OPS:` env var in compose, not by editing `data/ops.json`.
+- The README and user-facing strings (server name, web UI copy, etc.) are in
+  **Czech**. Code, comments, commit messages, and architecture docs are in
+  **English**. Keep them that way.
+- Operator list is managed via `OPS:` env var in compose for bootstrap; ongoing
+  changes flow through the web → sync-agent → RCON. Avoid editing
+  `data/ops.json` by hand.
 - Never commit `data/`, `.env`, or `backups/` to git (all covered by `.gitignore`).
 - When updating `docker-compose.yml`, run `docker compose config` first to validate syntax.
