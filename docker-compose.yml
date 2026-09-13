@@ -10,23 +10,30 @@ services:
       MEMORY: "4G"
       USE_AIKAR_FLAGS: "true"
       TYPE: "PAPER"
-      VIEW_DISTANCE: 6
-      SIMULATION_DISTANCE: 6
+      # VIEW_DISTANCE = chunks sent to clients (cheap). SIMULATION_DISTANCE =
+      # chunks the server ticks (expensive). Keep them decoupled; see
+      # ARCHITECTURE.md section 12.
+      VIEW_DISTANCE: 8
+      SIMULATION_DISTANCE: 4
       GUI: "FALSE"
-      VERSION: "LATEST"
+      VERSION: "26.1.2"
       DIFFICULTY: "normal"
       MODE: "survival"
       SERVER_NAME: "Salosianska LAN party"
       ICON: "https://raw.githubusercontent.com/Salesiani-Pardubice/.github/refs/heads/main/assets/logotypes/logo-SDB-color.png"
       PVP: "true"
       ENABLE_QUERY: "TRUE"
-      MAX_PLAYERS: 10
+      MAX_PLAYERS: 20
       ENABLE_COMMAND_BLOCK: "FALSE"
       ANNOUNCE_PLAYER_ACHIEVEMENTS: "TRUE"
       ALLOW_FLIGHT: "FALSE"
       ENABLE_STATUS: "TRUE"
       SPAWN_PROTECTION: "0"
       ONLINE_MODE: "TRUE"
+      ENABLE_WHITELIST: "TRUE"
+      # Break-glass owner only. Ops are managed through the admin panel over
+      # RCON; this list is MERGEd on every start, so any name left here would
+      # be silently re-added after being removed. See ARCHITECTURE.md section 7.
       OPS: |
         petrkucerak
       ENABLE_AUTOPAUSE: "FALSE"
@@ -36,12 +43,11 @@ services:
       ENTITY_BROADCAST_RANGE_PERCENTAGE: 50
       USES_PLUGINS: true
       MODRINTH_PROJECTS: |
-        worldedit
-        worldguard
-       # luckperms
-       # coreprotect
+        worldedit:7.4.5
+        worldguard:7.0.18
+        coreprotect:24.0
+        squaremap:1.3.13.1
 
-      
     volumes:
       - ./data:/data
     ports:

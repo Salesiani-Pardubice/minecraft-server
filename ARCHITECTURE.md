@@ -341,11 +341,26 @@ the only artifact that would have made a rollback possible.
 10 GB tier holds years of history. The upload is outbound-only, consistent with
 principle 5.
 
+> **Deferred.** Cloudflare R2 requires a payment card on file, so off-box
+> backups are not yet active. Until they are, **the only protection is the local
+> 14-day window on the same disk as the world** — the defect described above is
+> live, not hypothetical. This is the largest open risk in the system and should
+> be closed before the world accumulates anything worth keeping. Any off-box
+> destination works; R2 is a preference, not a requirement.
+
 The `itzg/mc-backup` image ships both `restic` and `rclone`
-(`BACKUP_METHOD` accepts `tar`, `restic`, `rsync`). **We use `restic` against
-R2**, for two properties a plain file mirror does not have: deduplication, so a
-year of history of an incrementally-changing world costs little more than a few
-full copies, and built-in grandfather-father-son retention.
+(`BACKUP_METHOD` accepts `tar`, `restic`, `rsync`). The intended design uses
+`restic` against R2, for two properties a plain file mirror does not have:
+deduplication, so a year of history of an incrementally-changing world costs
+little more than a few full copies, and built-in grandfather-father-son
+retention.
+
+**One container cannot do both.** `BACKUP_METHOD` is a single value, so local
+`tar` archives and off-box `restic` snapshots need **two `mc-backup`
+containers** with staggered `INITIAL_DELAY` so their `save-off` windows do not
+overlap. That is deliberate rather than wasteful: during a LAN party the venue's
+uplink may be unavailable, and a rollback should not depend on reaching the
+internet. Cost is roughly 20 MB.
 
 Retention off-box is deliberately longer than the local 14 days:
 
@@ -408,6 +423,13 @@ bandwidth. 8 GB total; ~805 GB of free NVMe is irrelevant by comparison.
 
 Every image must be `linux/arm64`.
 
+**Measuring this on the Pi is misleading while anyone is developing on it.**
+A VS Code remote server and an agent session together hold roughly 1.9 GB, so
+`free -h` run over SSH reports far less headroom than the deployed system has.
+Measured immediately after the 26.1.2 migration: 7.1 GB used, of which the JVM
+was 4.5 GB and developer tooling 1.9 GB. Subtract the latter before concluding
+anything about capacity.
+
 ### Tuning for ~20 players
 
 `MAX_PLAYERS: 20`, and one correction to the current settings:
@@ -443,20 +465,29 @@ being made solely to get CoreProtect ([§6](#6-version-policy)) — so step 3 is
 the one step that buys a capability at the price of the existing world, and the
 one to revisit if a CoreProtect 26.2 build appears before it is executed.
 
-1. Add off-box backups ([§10](#10-backups)) and **test a restore**. First,
-   because everything after this point is safer with it.
-2. Pin `VERSION: "26.1.2"`; add `squaremap` and `coreprotect` to
-   `MODRINTH_PROJECTS`.
-3. Stop the stack, move `data/world*` aside, start fresh. Verify in the log that
-   all four plugins loaded.
-4. Apply the 20-player tuning ([§12](#12-resource-budget)); reduce `OPS:` to a
-   single break-glass owner ([§7](#7-state-ownership)).
+1. ~~Add off-box backups and **test a restore**.~~ **Deferred**, see
+   [§10](#10-backups). Executed instead: the pre-migration world was archived to
+   `/home/pedro/world-archive/` with a checksum, outside the pruning window.
+2. ✅ Pin `VERSION: "26.1.2"`; add `squaremap` and `coreprotect` to
+   `MODRINTH_PROJECTS`, with every plugin pinned to an exact version.
+3. ✅ Stop the stack, move `data/world` aside, start fresh. Verify in the log
+   that all four plugins loaded.
+4. ✅ Apply the 20-player tuning ([§12](#12-resource-budget)); enable the
+   whitelist; keep `OPS:` at a single break-glass owner
+   ([§7](#7-state-ownership)).
+
+   The whitelist is enabled with **no `WHITELIST:` environment list**. That
+   variable carries the same MERGE semantics as `OPS`, so any name in it would
+   be re-added after the admin panel removed it. The admin API is the only
+   writer; operators bypass the whitelist, which is how the first administrator
+   gets in while the list is still empty.
 5. Run the initial full map render overnight.
 6. Add `cloudflared`; create the `minecraft.salesianipardubice.cz` hostname;
    publish `/mapa`.
 7. Build `admin-api` + UI; put Cloudflare Access with a GitHub organisation
    policy in front of `/admin` and `/api/*`.
 8. Add the info page to the main website repository.
+9. Close the deferred off-box backup ([§10](#10-backups)).
 
 `mc.salesianipardubice.cz` is not touched at any step.
 
