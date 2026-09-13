@@ -552,12 +552,26 @@ one to revisit if a CoreProtect 26.2 build appears before it is executed.
   registration form on the web, and therefore no personal data in this system
   beyond Minecraft usernames.
 - **Admin authentication** is **Cloudflare Access with GitHub as the identity
-  provider**, authorising on membership of the **`salesianipardubice`** GitHub
-  organisation — in practice, the people who can already contribute to this
-  repository. (Access policies match reliably on organisation; whether they can
-  narrow to a specific team is to be confirmed when the policy is created.) No passwords, no
+  provider**, authorising on membership of the **`Salesiani-Pardubice`** GitHub
+  organisation, narrowed to the **`Minecraft Admins`** team. No passwords, no
   session handling, and no authentication code in this repository. It mirrors
   how Sveltia CMS already authenticates against the website repository.
+
+  Confirmed working: the GitHub integration returns organisation **and** team
+  membership, which is what makes the narrowing possible. A dedicated team is
+  the right granularity here — the organisation as a whole contains people with
+  no relationship to the server, and this panel can restart it and change who
+  may join.
+
+  **The application JWT is deliberately slim.** It carries `email`, `sub`,
+  `aud`, `iss`, the timestamps and little else — *not* group or organisation
+  membership, even when the identity provider supplies it. Policies are
+  evaluated at Cloudflare's edge against the full identity, which the origin
+  never sees. So an empty `groups` claim proves nothing about what GitHub
+  returned; the authoritative view is
+  `https://<team>.cloudflareaccess.com/cdn-cgi/access/get-identity`. Mistaking
+  the slim token for the full identity sends you looking for a broken OAuth
+  scope that is not broken.
 - **The admin API verifies the `Cf-Access-Jwt-Assertion` JWT** rather than
   assuming that traffic arriving on the tunnel came through Access. Cheap to
   implement, and the difference between "secure" and "secure until something is
