@@ -1,5 +1,5 @@
 // Command admin-api serves the public surfaces of
-// minecraft.petrkucerak.cz from the Raspberry Pi.
+// minecraft.salesianipardubice.cz from the Raspberry Pi.
 //
 // It owns the whole hostname so that Cloudflare Tunnel has a single origin and
 // path routing stays on this side: /mapa is public, /admin and /api will sit

@@ -120,9 +120,9 @@ Pi's own uplink — the map going down does not take the game with it.
 | --------------------------------------- | ------------------------------- | ------------------------------- | ------------------ |
 | `mc.salesianipardubice.cz:25565`        | the game                        | playit.gg (A record, unchanged) | no                 |
 | `salesianipardubice.cz/minecraft`       | info, how to connect, LAN dates | Cloudflare Pages, static        | **yes**            |
-| `minecraft.petrkucerak.cz/mapa`  | world map                       | Pi via cloudflared              | no                 |
-| `minecraft.petrkucerak.cz/admin` | administration                  | Pi via cloudflared + Access     | no                 |
-| `minecraft.petrkucerak.cz/api/*` | admin JSON API                  | Pi via cloudflared + Access     | no                 |
+| `minecraft.salesianipardubice.cz/mapa`  | world map                       | Pi via cloudflared              | no                 |
+| `minecraft.salesianipardubice.cz/admin` | administration                  | Pi via cloudflared + Access     | no                 |
+| `minecraft.salesianipardubice.cz/api/*` | admin JSON API                  | Pi via cloudflared + Access     | no                 |
 
 Two deliberate choices here:
 
@@ -133,21 +133,20 @@ a Cloudflare tunnel, and the workaround — an SRV record at
 works for players, for a cosmetically shorter URL. Not worth the risk. The web
 surfaces live on a new `minecraft.` hostname instead.
 
-**The web surfaces sit on `petrkucerak.cz`, the info page on
-`salesianipardubice.cz`.** The tunnel hostname lives on the maintainer's
-personal domain because that is the zone in the Cloudflare account running the
-tunnel. It works, and nothing about the design depends on which zone it is —
-but it is worth being explicit that a service for the youth centre currently
-reaches the public through a personal domain. Moving it to
-`minecraft.salesianipardubice.cz` later is a DNS change plus one edit to the
-tunnel route; no code changes.
-
 **Info lives on the main site, not on `minecraft.`.** It is the one surface
 people look for precisely when the server is down, so it must not depend on the
 Pi. It is also plain content: it belongs where the rest of the organisation's
 content is, and inherits design, navigation and SEO for free.
 
-`minecraft.petrkucerak.cz` is a single origin — one Cloudflare tunnel,
+**Everything lives in the organisation's Cloudflare account**, not a personal
+one. The map briefly ran on the maintainer's own domain because that was the
+account holding the first tunnel; it was moved before any Access policy, shared
+link or bookmark could accumulate against it. Two `cloudflared` instances from
+different accounts coexist on one host without conflict — the process makes only
+outbound connections and binds no port — so the constraint was never technical,
+only organisational continuity.
+
+`minecraft.salesianipardubice.cz` is a single origin — one Cloudflare tunnel,
 one hostname, no CORS. Access policies are applied per path: `/mapa` public,
 `/admin` and `/api/*` restricted.
 
@@ -185,7 +184,7 @@ a fault here cannot corrupt the live world. See [§10](#10-backups).
 ### 5.3 `cloudflared` *(new)*
 
 Cloudflare Tunnel agent. Establishes an outbound connection to Cloudflare and
-routes `minecraft.petrkucerak.cz` to two local origins:
+routes `minecraft.salesianipardubice.cz` to two local origins:
 
 - `/mapa/*` → the squaremap tile directory
 - `/admin`, `/api/*` → `admin-api`
@@ -423,7 +422,7 @@ What actually crosses the boundary is small:
 
 The admin UI is served **from the Pi**, not from Pages, and lives in this
 repository alongside the API it talks to. Three reasons: it is always version-
-matched to its API; it keeps `minecraft.petrkucerak.cz` a single origin
+matched to its API; it keeps `minecraft.salesianipardubice.cz` a single origin
 with no CORS; and an administration tool should not depend on a second
 deployment pipeline being healthy, since it is the break-glass interface.
 
@@ -510,7 +509,7 @@ one to revisit if a CoreProtect 26.2 build appears before it is executed.
 5. ✅ Run the initial full map render — 5 s on the new world, no overnight
    window needed.
 6. ✅ Add `cloudflared` (pinned `2026.9.1`, token from `.env`, on `mcnet`) and
-   route `minecraft.petrkucerak.cz` → `admin-api:8080`. The map is live.
+   route `minecraft.salesianipardubice.cz` → `admin-api:8080`. The map is live.
 
    The route was created as a **Public Hostname**, not a private network route.
    The distinction matters and is easy to get wrong: a private route is reachable
