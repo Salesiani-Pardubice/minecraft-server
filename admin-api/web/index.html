@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Správa Minecraft serveru</title>
+<style>
+/* Brand tokens duplicated from salesianipardubice.cz. Five values and two font
+   files are cheaper to copy than to couple two repositories together.
+   See ARCHITECTURE.md section 11. */
+@font-face{font-family:"Chronica Pro";src:url("/admin/fonts/ChronicaPro-Book.woff2") format("woff2");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:"Chronica Pro";src:url("/admin/fonts/ChronicaPro-Black.woff2") format("woff2");font-weight:900;font-style:normal;font-display:swap}
+
+:root{
+  --primary:#db0016; --secondary:#697c8d; --accent:#ab8266;
+  --light:#e6dbd1; --dark:#424a52;
+  --bg:#f7f5f3; --surface:#fff; --line:#e2ddd8;
+  --ok:#2e7d32; --warn:#b26a00;
+  --font:"Chronica Pro",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#1c2024;--surface:#24292e;--line:#343b42;--dark:#e8eaec;--secondary:#9aa7b3;--light:#3a3f45}
+}
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--dark);font-family:var(--font);line-height:1.5;
+  -webkit-font-smoothing:antialiased}
+
+header{background:var(--primary);color:#fff;
+  padding:calc(1.25rem + max(0px,env(safe-area-inset-top))) 1rem 1.25rem}
+header .inner{max-width:70rem;margin:0 auto;display:flex;flex-wrap:wrap;gap:.5rem 1rem;
+  align-items:baseline;justify-content:space-between}
+header h1{margin:0;font-size:1.35rem;font-weight:900;letter-spacing:-.01em}
+header .who{font-size:.85rem;opacity:.85;word-break:break-all}
+
+main{max-width:70rem;margin:0 auto;padding:1.25rem 1rem 4rem;
+  display:grid;gap:1.25rem;grid-template-columns:1fr}
+@media (min-width:52rem){
+  main{grid-template-columns:1fr 1fr}
+  .wide{grid-column:1/-1}
+}
+
+section{background:var(--surface);border:1px solid var(--line);border-radius:.75rem;padding:1.15rem}
+section h2{margin:0 0 .9rem;font-size:1rem;font-weight:900;text-transform:uppercase;
+  letter-spacing:.06em;color:var(--secondary)}
+
+.status{display:flex;flex-wrap:wrap;gap:1.5rem;align-items:center}
+.dot{display:inline-block;width:.7rem;height:.7rem;border-radius:50%;margin-right:.45rem;
+  background:var(--secondary);vertical-align:middle}
+.dot.up{background:var(--ok)} .dot.down{background:var(--primary)}
+.metric .n{font-size:1.9rem;font-weight:900;line-height:1.1;display:block}
+.metric .l{font-size:.8rem;color:var(--secondary)}
+
+ul.people{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.4rem}
+ul.people li{display:flex;align-items:center;gap:.6rem;padding:.5rem .7rem;
+  background:var(--bg);border-radius:.5rem;font-size:.95rem}
+ul.people li .name{flex:1;min-width:0;overflow-wrap:anywhere}
+ul.people li .tag{font-size:.75rem;color:var(--secondary);white-space:nowrap}
+.empty{color:var(--secondary);font-size:.9rem;font-style:italic;margin:0}
+
+form.add{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.9rem}
+input[type=text]{flex:1;min-width:9rem;padding:.55rem .7rem;font:inherit;font-size:.95rem;
+  color:var(--dark);background:var(--surface);
+  border:1px solid var(--line);border-radius:.5rem}
+input[type=text]:focus-visible,button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+
+button{font:inherit;font-size:.9rem;font-weight:900;cursor:pointer;border:0;border-radius:.5rem;
+  padding:.55rem .9rem;background:var(--dark);color:var(--bg);transition:opacity .15s}
+button:hover{opacity:.85}
+button[disabled]{opacity:.45;cursor:not-allowed}
+button.ghost{background:transparent;color:var(--secondary);border:1px solid var(--line);
+  padding:.3rem .6rem;font-size:.8rem}
+button.ghost:hover{color:var(--primary);border-color:var(--primary);opacity:1}
+button.danger{background:var(--primary);color:#fff}
+
+.note{font-size:.83rem;color:var(--secondary);margin:.9rem 0 0}
+.msg{margin-top:.9rem;padding:.6rem .75rem;border-radius:.5rem;font-size:.88rem;display:none}
+.msg.show{display:block}
+.msg.ok{background:rgba(46,125,50,.12);color:var(--ok)}
+.msg.err{background:rgba(219,0,22,.1);color:var(--primary)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="inner">
+    <h1>Správa Minecraft serveru</h1>
+    <span class="who" id="who">…</span>
+  </div>
+</header>
+
+<main>
+  <section class="wide">
+    <h2>Stav serveru</h2>
+    <div class="status">
+      <div><span class="dot" id="dot"></span><strong id="state">Zjišťuji…</strong></div>
+      <div class="metric"><span class="n" id="count">–</span><span class="l">hráčů online</span></div>
+      <div class="metric"><span class="n" id="max">–</span><span class="l">kapacita</span></div>
+      <button class="ghost" id="refresh" type="button">Obnovit</button>
+    </div>
+    <ul class="people" id="online" hidden></ul>
+    <div class="msg" id="statusMsg"></div>
+  </section>
+
+  <section>
+    <h2>Whitelist</h2>
+    <ul class="people" id="whitelist"></ul>
+    <form class="add" id="whitelistForm">
+      <input type="text" id="whitelistName" placeholder="Přezdívka hráče" autocomplete="off"
+             pattern="[A-Za-z0-9_]{3,16}" required>
+      <button type="submit">Přidat</button>
+    </form>
+    <p class="note">Hráči se na server dostanou přes přihlášku do kroužku; sem se doplňuje jen přezdívka.</p>
+    <div class="msg" id="whitelistMsg"></div>
+  </section>
+
+  <section>
+    <h2>Operátoři</h2>
+    <ul class="people" id="ops"></ul>
+    <form class="add" id="opsForm">
+      <input type="text" id="opsName" placeholder="Přezdívka hráče" autocomplete="off"
+             pattern="[A-Za-z0-9_]{3,16}" required>
+      <button type="submit">Přidat</button>
+    </form>
+    <p class="note">Odebraný operátor se po restartu vrátí, pokud jeho jméno zůstalo v <code>OPS:</code>
+       v <code>docker-compose.yml</code>.</p>
+    <div class="msg" id="opsMsg"></div>
+  </section>
+
+  <section class="wide">
+    <h2>Restart serveru</h2>
+    <p class="note" style="margin-top:0">Hráči budou odpojeni. Server se sám nastartuje zpátky
+       zhruba do minuty. Nejdřív zkontroluj, že nikdo nehraje.</p>
+    <form class="add" id="restartForm">
+      <input type="text" id="restartMsg" placeholder="Zpráva hráčům (nepovinné)"
+             autocomplete="off" maxlength="200">
+      <button type="submit" class="danger" id="restartBtn">Restartovat</button>
+    </form>
+    <div class="msg" id="restartMsgBox"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function say(box, text, ok) {
+  box.textContent = text;
+  box.className = "msg show " + (ok ? "ok" : "err");
+  if (ok) setTimeout(() => { box.className = "msg"; }, 4000);
+}
+
+async function api(path, options) {
+  const res = await fetch(path, {
+    ...options,
+    headers: {"Content-Type": "application/json", ...(options && options.headers)},
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || ("HTTP " + res.status));
+  return body;
+}
+
+function renderPeople(el, names, onRemove, tagFor) {
+  el.innerHTML = "";
+  if (!names.length) {
+    el.insertAdjacentHTML("beforeend", '<p class="empty">Zatím nikdo.</p>');
+    return;
+  }
+  for (const n of names) {
+    const name = typeof n === "string" ? n : n.name;
+    const li = document.createElement("li");
+    const span = document.createElement("span");
+    span.className = "name";
+    span.textContent = name;
+    li.append(span);
+    const tag = tagFor && tagFor(n);
+    if (tag) {
+      const t = document.createElement("span");
+      t.className = "tag";
+      t.textContent = tag;
+      li.append(t);
+    }
+    if (onRemove) {
+      const b = document.createElement("button");
+      b.className = "ghost";
+      b.type = "button";
+      b.textContent = "Odebrat";
+      b.onclick = () => onRemove(name, b);
+      li.append(b);
+    }
+    el.append(li);
+  }
+}
+
+async function loadStatus() {
+  try {
+    const s = await api("/api/status");
+    const up = s.online === true;
+    $("dot").className = "dot " + (up ? "up" : "down");
+    $("state").textContent = up ? "Běží" : "Nedostupný";
+    $("count").textContent = up ? s.playerCount : "–";
+    $("max").textContent = up ? s.maxPlayers : "–";
+    const list = $("online");
+    if (up && s.players && s.players.length) {
+      list.hidden = false;
+      list.style.marginTop = "1rem";
+      renderPeople(list, s.players, null, null);
+    } else {
+      list.hidden = true;
+    }
+    if (!up && s.error) say($("statusMsg"), s.error, false);
+  } catch (e) {
+    $("dot").className = "dot down";
+    $("state").textContent = "Chyba";
+    say($("statusMsg"), e.message, false);
+  }
+}
+
+async function loadWhitelist() {
+  try {
+    const d = await api("/api/whitelist");
+    renderPeople($("whitelist"), d.players, async (name, btn) => {
+      btn.disabled = true;
+      try {
+        await api("/api/whitelist/" + encodeURIComponent(name), {method: "DELETE"});
+        say($("whitelistMsg"), name + " odebrán z whitelistu.", true);
+        loadWhitelist();
+      } catch (e) { say($("whitelistMsg"), e.message, false); btn.disabled = false; }
+    });
+  } catch (e) { say($("whitelistMsg"), e.message, false); }
+}
+
+async function loadOps() {
+  try {
+    const d = await api("/api/ops");
+    renderPeople($("ops"), d.operators, async (name, btn) => {
+      btn.disabled = true;
+      try {
+        await api("/api/ops/" + encodeURIComponent(name), {method: "DELETE"});
+        say($("opsMsg"), name + " už není operátor.", true);
+        loadOps();
+      } catch (e) { say($("opsMsg"), e.message, false); btn.disabled = false; }
+    }, (o) => "úroveň " + o.level);
+  } catch (e) { say($("opsMsg"), e.message, false); }
+}
+
+function wireAdd(formId, inputId, endpoint, msgId, reload, okText) {
+  $(formId).addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const input = $(inputId);
+    const name = input.value.trim();
+    const btn = ev.target.querySelector("button");
+    btn.disabled = true;
+    try {
+      await api(endpoint, {method: "POST", body: JSON.stringify({name})});
+      say($(msgId), okText(name), true);
+      input.value = "";
+      reload();
+    } catch (e) { say($(msgId), e.message, false); }
+    btn.disabled = false;
+  });
+}
+
+wireAdd("whitelistForm", "whitelistName", "/api/whitelist", "whitelistMsg",
+        loadWhitelist, (n) => n + " přidán na whitelist.");
+wireAdd("opsForm", "opsName", "/api/ops", "opsMsg",
+        loadOps, (n) => n + " je nyní operátor.");
+
+$("restartForm").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  if (!confirm("Opravdu restartovat server? Všichni hráči budou odpojeni.")) return;
+  const btn = $("restartBtn");
+  btn.disabled = true;
+  try {
+    const d = await api("/api/restart", {
+      method: "POST",
+      body: JSON.stringify({message: $("restartMsg").value.trim()}),
+    });
+    say($("restartMsgBox"), d.result, true);
+    $("restartMsg").value = "";
+    setTimeout(loadStatus, 5000);
+  } catch (e) { say($("restartMsgBox"), e.message, false); }
+  setTimeout(() => { btn.disabled = false; }, 5000);
+});
+
+$("refresh").addEventListener("click", loadStatus);
+
+api("/api/identity")
+  .then((id) => { $("who").textContent = id.email || id.sub || ""; })
+  .catch(() => { $("who").textContent = ""; });
+
+loadStatus();
+loadWhitelist();
+loadOps();
+setInterval(loadStatus, 30000);
+</script>
+</body>
+</html>

@@ -8,8 +8,10 @@ package main
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -18,6 +20,13 @@ import (
 	"syscall"
 	"time"
 )
+
+// The admin UI ships inside the binary: it is always version-matched to the
+// API it talks to, and there is no Node toolchain on the Pi side to build it
+// with. See ARCHITECTURE.md section 11.
+//
+//go:embed web
+var adminUI embed.FS
 
 func main() {
 	addr := envOr("ADDR", ":8080")
@@ -50,7 +59,15 @@ func main() {
 		log.Print("WARNING: RCON_ADDR or RCON_PASSWORD is unset - the API cannot reach the server")
 	}
 	(&api{mc: mc}).routes(mux, verifier.requireAccess)
-	mux.Handle("GET /admin", verifier.requireAccess(http.HandlerFunc(handleAdmin)))
+	ui, err := fs.Sub(adminUI, "web")
+	if err != nil {
+		log.Fatalf("embedded admin UI: %v", err)
+	}
+	mux.Handle("GET /admin", verifier.requireAccess(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFileFS(w, r, ui, "index.html")
+	})))
+	mux.Handle("GET /admin/", verifier.requireAccess(
+		http.StripPrefix("/admin/", noIndex(http.FileServer(http.FS(ui))))))
 
 	srv := &http.Server{
 		Addr:              addr,
@@ -86,16 +103,6 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 // quickest way to tell an authentication problem from an authorisation one.
 func handleIdentity(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, identityFrom(r.Context()))
-}
-
-func handleAdmin(w http.ResponseWriter, r *http.Request) {
-	id := identityFrom(r.Context())
-	who := id.Email
-	if who == "" {
-		who = id.Subject
-	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = w.Write([]byte("Access ověřen jako " + who + ".\nAdministrace se teprve staví.\n"))
 }
 
 func redirectTo(target string) http.HandlerFunc {

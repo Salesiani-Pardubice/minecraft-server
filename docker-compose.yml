@@ -78,7 +78,7 @@ services:
 
   admin-api:
     build: ./admin-api
-    image: salesiani/minecraft-admin-api:0.3.0
+    image: salesiani/minecraft-admin-api:0.4.0
     container_name: admin-api
     environment:
       TZ: "Europe/Prague"
