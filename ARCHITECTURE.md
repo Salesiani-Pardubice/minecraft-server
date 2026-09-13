@@ -207,6 +207,20 @@ Exposed operations:
 | operators — list, add, remove                   | RCON `op` / `deop`               |
 | force a backup                                  | signal the `mc-backup` container |
 | restart the server                              | RCON `stop`                      |
+| `GET /api/identity` — echo the verified Access identity | claims from the assertion |
+
+`/api/identity` is a diagnostic: it reports exactly which claims Cloudflare
+forwarded to the origin. An Access policy that authenticates but refuses to
+authorise is otherwise hard to tell apart from one that fails to authenticate at
+all, and the answer — whether the identity provider returned group or
+organisation membership — is visible only here or in Cloudflare's own logs.
+
+**Everything behind Access fails closed.** A missing audience, an unreachable
+key set, an absent header or a bad signature all refuse; none of them pass. If
+`ACCESS_TEAM_DOMAIN` or `ACCESS_AUD` is unset the protected paths return 503
+rather than serving, so a half-finished deployment cannot quietly expose them.
+RS256 is pinned rather than read from the token header, which is what makes
+algorithm-confusion and `alg: none` irrelevant.
 
 **Restart is deliberately implemented as `rcon-cli stop`,** relying on
 `restart: unless-stopped` to bring the container back. The obvious alternative —

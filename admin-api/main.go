@@ -2,17 +2,18 @@
 // minecraft.salesianipardubice.cz from the Raspberry Pi.
 //
 // It owns the whole hostname so that Cloudflare Tunnel has a single origin and
-// path routing stays on this side: /mapa is public, /admin and /api will sit
+// path routing stays on this side: /mapa is public, /admin and /api/* sit
 // behind Cloudflare Access. See ARCHITECTURE.md sections 4 and 5.4.
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"context"
 	"strings"
 	"syscall"
 	"time"
@@ -21,12 +22,31 @@ import (
 func main() {
 	addr := envOr("ADDR", ":8080")
 	mapDir := envOr("MAP_DIR", "/srv/map")
+	verifier := newAccessVerifier(os.Getenv("ACCESS_TEAM_DOMAIN"), os.Getenv("ACCESS_AUD"))
+
+	if !verifier.configured() {
+		log.Print("WARNING: ACCESS_TEAM_DOMAIN or ACCESS_AUD is unset - /admin and /api/* will refuse every request")
+	} else {
+		// Warm the key set so the first real request is not also the one
+		// paying for a round trip to Cloudflare.
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		if err := verifier.refreshKeys(ctx); err != nil {
+			log.Printf("could not preload Access signing keys (will retry on demand): %v", err)
+		}
+		cancel()
+	}
 
 	mux := http.NewServeMux()
+
+	// Public.
 	mux.HandleFunc("GET /healthz", handleHealth)
 	mux.Handle("GET /mapa/", http.StripPrefix("/mapa/", noIndex(http.FileServer(http.Dir(mapDir)))))
 	mux.HandleFunc("GET /mapa", redirectTo("/mapa/"))
 	mux.HandleFunc("GET /{$}", redirectTo("/mapa/"))
+
+	// Behind Cloudflare Access.
+	mux.Handle("GET /api/identity", verifier.requireAccess(http.HandlerFunc(handleIdentity)))
+	mux.Handle("GET /admin", verifier.requireAccess(http.HandlerFunc(handleAdmin)))
 
 	srv := &http.Server{
 		Addr:              addr,
@@ -54,8 +74,24 @@ func main() {
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(`{"status":"ok"}`))
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleIdentity echoes the verified Access identity. It exists to answer, from
+// the origin's point of view, exactly which claims Cloudflare forwarded - the
+// quickest way to tell an authentication problem from an authorisation one.
+func handleIdentity(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, identityFrom(r.Context()))
+}
+
+func handleAdmin(w http.ResponseWriter, r *http.Request) {
+	id := identityFrom(r.Context())
+	who := id.Email
+	if who == "" {
+		who = id.Subject
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write([]byte("Access ověřen jako " + who + ".\nAdministrace se teprve staví.\n"))
 }
 
 func redirectTo(target string) http.HandlerFunc {
@@ -82,6 +118,12 @@ func logRequests(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 		log.Printf("%s %s %s", r.Method, r.URL.Path, time.Since(start).Round(time.Millisecond))
 	})
+}
+
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 func envOr(key, fallback string) string {

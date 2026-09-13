@@ -77,12 +77,17 @@ services:
 
   admin-api:
     build: ./admin-api
-    image: salesiani/minecraft-admin-api:0.1.0
+    image: salesiani/minecraft-admin-api:0.2.0
     container_name: admin-api
     environment:
       TZ: "Europe/Prague"
       ADDR: ":8080"
       MAP_DIR: "/srv/map"
+      # /admin and /api/* verify the Cloudflare Access assertion themselves.
+      # If either of these is empty they refuse every request, so the paths are
+      # closed by default rather than open by accident.
+      ACCESS_TEAM_DOMAIN: ${ACCESS_TEAM_DOMAIN:-}
+      ACCESS_AUD: ${ACCESS_AUD:-}
     volumes:
       # squaremap renders static tiles here; we serve them directly rather than
       # exposing the plugin's own webserver.
