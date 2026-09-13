@@ -1,279 +1,542 @@
 # Architecture
 
-Status: **baseline — describes the system as it exists today (2026-09-13).**
+Status: **target architecture.** Sections marked *(dnes)* describe what already
+runs; everything else is to be built. The migration path from one to the other
+is in [§13](#13-migration).
 
-This document is a faithful description of the current deployment, written so
-that a full target architecture can be designed on top of it. It deliberately
-contains no plans, no proposals, and no components that do not exist yet.
-Open questions are collected at the end.
+Companion documents: [`AGENTS.md`](./AGENTS.md) for working rules,
+[`README.md`](./README.md) for Czech operator instructions.
 
 ---
 
-## 1. Overview
+## 1. Purpose
 
-A single Raspberry Pi 5 runs a Paper Minecraft server for Salesian LAN parties
-in Pardubice. The server has no public IP and sits behind the venue's NAT;
-reachability from the internet is provided by an outbound tunnel to playit.gg,
-which publishes the server at `mc.salesianipardubice.cz`.
+A Minecraft server for the Salesian youth centre in Pardubice, serving two
+audiences that share one world:
 
-The whole system is three Docker containers described by one
-`docker-compose.yml`. There is no application code in this repository —
-it is configuration only.
+- **LAN parties** — a burst of up to ~20 players in one room over a weekend.
+- **Long-term play** — a small group meeting on the server between events,
+  building in a world that persists across months.
+
+Around it, three public surfaces: information about the server, a browsable map
+of the world, and an administration panel.
+
+The system spans two independently deployed repositories:
+
+| Repository                    | Contents                                                    | Deployed to                    |
+| ----------------------------- | ----------------------------------------------------------- | ------------------------------ |
+| `minecraft-server` (this one) | Pi stack: game server, backups, tunnel, map, admin API + UI | Raspberry Pi 5, Docker Compose |
+| `salesianipardubice.cz`       | Main Astro website, incl. the Minecraft info page           | Cloudflare Pages               |
+
+They are **not** linked by git submodules. What couples them is a documented
+HTTP contract and a handful of shared brand tokens — see [§11](#11-repository-boundary).
+
+---
+
+## 2. Design principles
+
+These are the load-bearing decisions. Everything below follows from them, and a
+change that violates one is a redesign, not a tweak.
+
+1. **The game server is independent.** If Cloudflare, the tunnel, the map, or
+   the admin API fail, players still play. Nothing in the web path is on the
+   critical path of the game.
+2. **One writer per piece of state.** Every mutable thing has exactly one
+   component allowed to write it. Two writers on the same state is the bug
+   class that produces silent resurrection of deleted data — see the `OPS`
+   trap in [§7](#7-state-ownership).
+3. **The Minecraft server is the source of truth for game state.** Whitelist,
+   operators, world, player data. There is **no external database** anywhere in
+   this system.
+4. **The cloud side is static.** No Pages Functions, no D1, no KV. The only
+   dynamic component in the whole architecture is the admin API on the Pi.
+5. **The Pi accepts no unsolicited inbound traffic.** Both tunnels are
+   established outbound. No port forwarding, no firewall rules on the venue
+   network.
+6. **Everything is reproducible from `docker-compose.yml`.** No host cron, no
+   systemd units, no scripts a human must remember to run. `docker compose up -d`
+   on a clean host is the whole deployment.
+7. **Pin every version.** Game, plugins, images. Upgrades are deliberate edits,
+   never a side effect of a restart. See [§6](#6-version-policy).
+
+---
+
+## 3. System overview
 
 ```mermaid
-graph LR
-  P[Player<br/>Minecraft client] -->|mc.salesianipardubice.cz:25565| PG[playit.gg<br/>edge]
-  PG -.->|tunnel, established outbound| PA
-  subgraph Pi["Raspberry Pi 5 — Debian 12"]
-    PA[playit-agent<br/>network_mode: host]
-    PA -->|127.0.0.1:25565| MC[minecraft-server<br/>Paper + JVM 4 GB]
-    BK[mc-backup] -->|RCON 25575| MC
-    MC <--> D[(./data<br/>bind mount)]
-    BK -.->|read-only| D
-    BK --> B[(/home/pedro/backups)]
+graph TB
+  subgraph Internet
+    PL[Player<br/>Minecraft client]
+    VIS[Visitor<br/>browser]
+    ADM[Admin<br/>browser]
   end
+
+  subgraph CF["Cloudflare"]
+    PAGES[Pages<br/>salesianipardubice.cz]
+    ACC[Access<br/>GitHub org policy]
+    EDGE[CDN / cache]
+  end
+
+  PG[playit.gg edge]
+
+  subgraph PI["Raspberry Pi 5 — Docker Compose"]
+    CFD[cloudflared]
+    API[admin-api<br/>+ static admin UI]
+    MC[minecraft-server<br/>Paper + squaremap + CoreProtect]
+    BK[mc-backup]
+    TILES[(squaremap tiles<br/>static files)]
+    WORLD[(./data — world)]
+  end
+
+  R2[(Cloudflare R2<br/>off-box backups)]
+
+  PL -->|"mc.salesianipardubice.cz:25565"| PG
+  PG -.->|outbound tunnel| MC
+
+  VIS -->|"/minecraft — info"| PAGES
+  VIS -->|"/mapa"| EDGE
+  ADM -->|"/admin"| ACC
+  ACC --> EDGE
+  EDGE -.->|outbound tunnel| CFD
+  CFD --> TILES
+  CFD --> API
+  API -->|RCON| MC
+  MC --> TILES
+  MC <--> WORLD
+  BK -->|RCON| MC
+  BK -.->|read-only| WORLD
+  BK --> R2
 ```
 
-The tunnel is **outbound only**. Nothing on the internet initiates a connection
-to the Pi; the agent dials out to playit.gg and the edge forwards player
-traffic back down that connection. No port forwarding or firewall rule on the
-venue network is required.
+Two independent outbound tunnels leave the Pi: **playit.gg** carries the game's
+raw TCP, **cloudflared** carries HTTPS. They share no failure mode beyond the
+Pi's own uplink — the map going down does not take the game with it.
 
 ---
 
-## 2. Components
+## 4. Naming and routing
 
-### 2.1 `minecraft-server`
+| URL                                     | Serves                          | Backed by                       | Survives Pi outage |
+| --------------------------------------- | ------------------------------- | ------------------------------- | ------------------ |
+| `mc.salesianipardubice.cz:25565`        | the game                        | playit.gg (A record, unchanged) | no                 |
+| `salesianipardubice.cz/minecraft`       | info, how to connect, LAN dates | Cloudflare Pages, static        | **yes**            |
+| `minecraft.salesianipardubice.cz/mapa`  | world map                       | Pi via cloudflared              | no                 |
+| `minecraft.salesianipardubice.cz/admin` | administration                  | Pi via cloudflared + Access     | no                 |
+| `minecraft.salesianipardubice.cz/api/*` | admin JSON API                  | Pi via cloudflared + Access     | no                 |
 
-| | |
-|---|---|
-| Image | `itzg/minecraft-server:2026.5.2-java25` |
-| Server | Paper, `VERSION: "LATEST"` → currently **26.2 build 123** |
-| Heap | 4 GB (`MEMORY: "4G"`), Aikar GC flags enabled |
-| Port | `25565` published on the host |
-| Network | `mcnet` (bridge) |
-| Volume | `./data` → `/data` |
-| Restart | `unless-stopped` |
+Two deliberate choices here:
 
-The image is a configuration generator as much as a runtime: on every start it
-reads the `environment:` block and writes `server.properties`, `bukkit.yml`,
-`spigot.yml`, `ops.json` and the rest into `/data`, then downloads the Paper
-jar and any `MODRINTH_PROJECTS` plugins before launching the JVM.
+**`mc.` is never touched.** It stays a plain A record to playit's anycast
+address. A single hostname cannot be both an A record to playit and a CNAME to
+a Cloudflare tunnel, and the workaround — an SRV record at
+`_minecraft._tcp.mc.` — would mean changing the one DNS record that currently
+works for players, for a cosmetically shorter URL. Not worth the risk. The web
+surfaces live on a new `minecraft.` hostname instead.
 
-Current gameplay configuration: survival, normal difficulty, PVP on, max 10
-players, online-mode (Mojang auth) on, no whitelist, flight disabled, command
-blocks disabled, spawn protection off, world size capped at 2000 blocks.
+**Info lives on the main site, not on `minecraft.`.** It is the one surface
+people look for precisely when the server is down, so it must not depend on the
+Pi. It is also plain content: it belongs where the rest of the organisation's
+content is, and inherits design, navigation and SEO for free.
 
-Performance-relevant settings, all chosen for the Pi:
-
-- `VIEW_DISTANCE: 6`, `SIMULATION_DISTANCE: 6` — the dominant TPS lever.
-- `ENTITY_BROADCAST_RANGE_PERCENTAGE: 50` — halves entity update traffic.
-- `USE_AIKAR_FLAGS: "true"` — the community-standard G1GC tuning for Paper.
-- `MAX_TICK_TIME: "-1"` — disables the watchdog, which would otherwise kill
-  the server during GC pauses that are routine on this hardware.
-- `ENABLE_AUTOPAUSE: "FALSE"` — the server stays warm between sessions.
-
-RCON is enabled on port `25575`, bound inside `mcnet` only and never published
-to the host. Because `RCON_PASSWORD` is unset, the image generates a random
-password per volume and persists it in `data/server.properties` and
-`data/.rcon-cli.env`; `mc-backup` picks it up from the shared `/data` mount.
-
-### 2.2 `mc-backup`
-
-| | |
-|---|---|
-| Image | `itzg/mc-backup:2026.5.0` |
-| Network | `mcnet` |
-| Volumes | `./data` → `/data` **read-only**, `/home/pedro/backups` → `/backups` |
-| Restart | `unless-stopped` |
-
-A sidecar loop: sleep, then for each cycle issue `save-off`, `save-all flush`
-and `sync` over RCON, write a `tar.gz` of `/data` to `/backups`, re-enable
-saving with `save-on`, and prune archives older than the retention window.
-
-- `INITIAL_DELAY: 2m` — lets the server finish starting before the first run.
-- `BACKUP_INTERVAL: 24h` — measured from container start, **not** wall-clock.
-  The backup hour therefore drifts to whenever the stack was last restarted.
-- `PRUNE_BACKUPS_DAYS: 14`.
-- `BACKUP_NAME: world` → archives named `world-YYYYMMDD-HHMMSS.tar.gz`.
-
-Because `/data` is mounted read-only, a bug or misconfiguration in this
-container cannot corrupt the live world. The only writable path is `/backups`.
-
-Note that the archive covers all of `/data`, not just the world directories —
-plugin configuration and the Paper jar are included.
-
-### 2.3 `playit`
-
-| | |
-|---|---|
-| Image | `ghcr.io/playit-cloud/playit-agent:0.16` |
-| Network | `network_mode: host` |
-| Secret | `SECRET_KEY` from `.env` |
-| Restart | `unless-stopped` |
-
-Runs on the host network namespace, which is why it is not attached to `mcnet`:
-it reaches the Minecraft server through the host's published `25565` rather
-than through the bridge. Tunnel routing (which public address maps to which
-local port) is configured in the playit.gg dashboard, not in this repository.
-
-If `SECRET_KEY` is missing this container fails while the other two keep
-running — the server is then reachable only on the LAN at `<pi>:25565`, which
-is in fact sufficient for a LAN party.
+`minecraft.salesianipardubice.cz` is a single origin — one Cloudflare tunnel,
+one hostname, no CORS. Access policies are applied per path: `/mapa` public,
+`/admin` and `/api/*` restricted.
 
 ---
 
-## 3. Configuration model
+## 5. Components
 
-The defining property of this system:
+### 5.1 `minecraft-server` *(dnes)*
+
+Paper, pinned, 4 GB heap, published on host port `25565`, on the `mcnet`
+bridge, bind-mounting `./data`. The `itzg/minecraft-server` image regenerates
+all configuration from the compose `environment:` block on every start; see
+[§8](#8-configuration-model).
+
+Plugins, all from `MODRINTH_PROJECTS`:
+
+| Plugin          | Role                        | Why it is not optional                                              |
+| --------------- | --------------------------- | ------------------------------------------------------------------- |
+| WorldEdit       | operator editing tool       | —                                                                   |
+| WorldGuard      | region protection           | protects spawn and long-term builds during events                   |
+| **CoreProtect** | block-change log + rollback | the only way to undo grief **without** rolling the whole world back |
+| **squaremap**   | map tile renderer           | serves [§9](#9-map)                                                 |
+
+CoreProtect earns its place specifically because LAN parties and long-term play
+share one world. Without a block log, the only recovery from a griefed build is
+restoring the entire world from a backup — which also discards everything
+everyone else did since. CoreProtect turns that into a targeted rollback.
+
+### 5.2 `mc-backup` *(dnes, to be extended)*
+
+Sidecar that quiesces the server over RCON (`save-off` → `save-all flush` →
+`sync`), archives `/data`, then `save-on`. `/data` is mounted **read-only**, so
+a fault here cannot corrupt the live world. See [§10](#10-backups).
+
+### 5.3 `cloudflared` *(new)*
+
+Cloudflare Tunnel agent. Establishes an outbound connection to Cloudflare and
+routes `minecraft.salesianipardubice.cz` to two local origins:
+
+- `/mapa/*` → the squaremap tile directory
+- `/admin`, `/api/*` → `admin-api`
+
+Credentials come from `.env`. If this container is down, the game is unaffected.
+
+### 5.4 `admin-api` *(new)*
+
+A small service on `mcnet` holding an RCON connection to the server, serving
+both the JSON API and the static admin UI. Written in **Go** — a static ARM64
+binary in a scratch image keeps the footprint near 30 MB, which matters here
+([§12](#12-resource-budget)).
+
+Exposed operations:
+
+| Operation                                       | Implementation                   |
+| ----------------------------------------------- | -------------------------------- |
+| server status — online players, version, uptime | RCON `list`, cached briefly      |
+| whitelist — list, add, remove                   | RCON `whitelist …`               |
+| operators — list, add, remove                   | RCON `op` / `deop`               |
+| force a backup                                  | signal the `mc-backup` container |
+| restart the server                              | RCON `stop`                      |
+
+**Restart is deliberately implemented as `rcon-cli stop`,** relying on
+`restart: unless-stopped` to bring the container back. The obvious alternative —
+mounting the Docker socket so the API can restart the container — would hand
+root-equivalent host access to the one component reachable from the internet.
+The RCON route achieves the same result with no privilege at all.
+
+### 5.5 Main website — the info page *(new, other repo)*
+
+A static Astro page at `salesianipardubice.cz/minecraft`: what the server is,
+the address to connect to, how to get access through the kroužek, house rules,
+and the dates of upcoming LAN weekends. Dates are **content**, managed through
+the existing Sveltia CMS as a content collection — a commit triggers a Pages
+rebuild. No database, no admin screen, no API.
+
+---
+
+## 6. Version policy
+
+`VERSION: "LATEST"` is abolished. It silently moved this server to Paper 26.2
+ahead of the plugin ecosystem, and because Minecraft cannot downgrade a world,
+that decision could not be walked back without discarding the world.
+
+**The pinned version is chosen as the intersection of plugin support, not as
+the newest release.** As of 2026-09-13:
+
+| Plugin | Supports 26.1.2 | Supports 26.2 |
+|---|---|---|
+| WorldEdit | ✅ 7.4.5 | ✅ 7.4.5 |
+| WorldGuard | ✅ 7.0.18 | ✅ 7.0.18 |
+| squaremap | ✅ 1.3.13.1 | ✅ 1.3.15 |
+| **CoreProtect** | ✅ 24.0 | ❌ no build |
+
+→ **`VERSION: "26.1.2"`**.
+
+CoreProtect is the sole blocker, and the choice is therefore narrow: reset the
+world and have block logging from day one, or keep the world and wait for a
+26.2 build. We reset, because **the cost of resetting only ever goes up**. This
+is the cheapest moment the long-term world will ever have to start properly,
+and starting it without a block log would leave its first months unprotected —
+exactly the period when the habit of building gets established.
+
+Revisit once CoreProtect ships 26.2 support: at that point the upgrade is
+ordinary and carries no world reset.
+
+Upgrade procedure: check that every plugin in `MODRINTH_PROJECTS` lists the
+candidate version on Modrinth, bump `VERSION`, `docker compose up -d`, verify
+the plugins actually loaded in the log. Never during an event, always with a
+fresh backup in hand. Container image tags are pinned exactly and bumped the
+same deliberate way.
+
+---
+
+## 7. State ownership
+
+Principle 2 in concrete terms. Each row has exactly one writer.
+
+| State                | Lives in                      | Written by         | Notes                           |
+| -------------------- | ----------------------------- | ------------------ | ------------------------------- |
+| World                | `data/world/`                 | the server         | the only irreplaceable state    |
+| Whitelist            | `data/whitelist.json`         | admin API via RCON | not mirrored anywhere           |
+| Operators            | `data/ops.json`               | admin API via RCON | see the trap below              |
+| Block history        | CoreProtect SQLite            | the plugin         | for rollback only               |
+| Map tiles            | `data/plugins/squaremap/web/` | squaremap          | derived, disposable             |
+| Server configuration | `docker-compose.yml`          | a human, in git    | regenerates `data/*` each start |
+| LAN party dates      | main website repo             | Sveltia CMS        | content, not state              |
+| Tunnel secrets       | `.env`                        | a human            | gitignored                      |
+
+**The `OPS` trap.** The image's `start-setupRbac` script treats an `OPS:` list
+in MERGE mode: existing `ops.json` entries are preserved and the env list is
+added on top. So an operator granted over RCON survives a restart — but an
+operator **removed** through the admin panel is silently re-added on the next
+`docker compose up -d` if their name is still in `OPS:`.
+
+Therefore, once the admin panel manages operators, **`OPS:` must be reduced to a
+single break-glass owner** and never used as the working operator list. This is
+principle 2 in action: two writers, one of which quietly resurrects what the
+other deleted.
+
+---
+
+## 8. Configuration model *(dnes)*
 
 > **`docker-compose.yml` is the configuration. `data/` is generated state.**
 
-Every setting a human would normally edit in `server.properties` is instead an
-environment variable in the compose file, and the image rewrites the generated
-files on each start. Hand-editing anything under `data/` is silently undone by
-the next restart.
+The image rewrites `server.properties`, `bukkit.yml`, `spigot.yml`, `ops.json`
+and the rest from environment variables on every start. Hand-editing anything
+under `data/` is undone by the next restart.
 
-Two multi-line values use YAML block scalars and deserve care, because a line
-commented out at the wrong indentation becomes part of the string rather than
-a comment:
+Two values use YAML block scalars (`OPS`, `MODRINTH_PROJECTS`) where a line
+commented out at the wrong indentation silently becomes part of the string.
+Verify with `docker compose config` after touching them.
 
-```yaml
-OPS: |
-  petrkucerak
-MODRINTH_PROJECTS: |
-  worldedit
-  worldguard
+Plugins have two installation paths that do not know about each other:
+`MODRINTH_PROJECTS` entries are re-downloaded every start; jars placed in
+`data/plugins/` by hand load unconditionally. Removing a plugin means removing
+both.
+
+---
+
+## 9. Map
+
+squaremap renders the world to **plain PNG tiles on disk**. This single fact
+drives the design: rendering is expensive, serving is free.
+
+- `cloudflared` serves the tile directory as static files. squaremap's built-in
+  webserver is not exposed; it is an implementation detail.
+- Cloudflare caches tiles at the edge, so repeat visitors cost the Pi nothing.
+- **Throttling means throttling the renderer, not the website.** Background
+  rendering is **scheduled for night hours** rather than driven by player count:
+  a fixed window is far simpler than reacting to who is online, and the map
+  merely goes a few hours stale, which is invisible on a survival world. There
+  is no reason to choose between having a map and having player capacity.
+- The one genuinely heavy operation is the **initial full render**. Run it once,
+  overnight, before the world is opened to players.
+
+squaremap runs inside the server JVM, so its render buffers compete with
+gameplay for the same 4 GB heap — the reason to throttle during play is heap
+pressure and CPU inside the JVM, not host memory.
+
+Exact configuration keys (background render interval, thread count) are to be
+determined against the pinned squaremap build rather than assumed.
+
+---
+
+## 10. Backups
+
+Current behaviour *(dnes)*: `world-*.tar.gz` every 24 h from container start,
+14-day retention, written to `/home/pedro/backups`.
+
+Two defects, both to be fixed:
+
+**It is a copy, not a backup.** The archives sit on the same NVMe as the world
+they protect. A disk failure or a mistaken `rm` takes both. This stopped being
+theoretical on 2026-09-13: retention pruned the last pre-upgrade archive at
+13:56:33, one minute after the server had already upgraded the world — removing
+the only artifact that would have made a rollback possible.
+
+→ **An off-box copy is required.** The world is ~14 MB, so Cloudflare R2's free
+10 GB tier holds years of history. The upload is outbound-only, consistent with
+principle 5.
+
+The `itzg/mc-backup` image ships both `restic` and `rclone`
+(`BACKUP_METHOD` accepts `tar`, `restic`, `rsync`). **We use `restic` against
+R2**, for two properties a plain file mirror does not have: deduplication, so a
+year of history of an incrementally-changing world costs little more than a few
+full copies, and built-in grandfather-father-son retention.
+
+Retention off-box is deliberately longer than the local 14 days:
+
+| Tier | Kept |
+|---|---|
+| daily | 14 |
+| weekly | 8 |
+| monthly | 12 |
+
+The local 14-day window only protects against damage noticed immediately.
+Grief or corruption discovered a month later — the realistic case on a server
+people visit irregularly — needs the monthly tier.
+
+**Restore has never been exercised.** An untested restore is not a backup.
+The procedure must be written down, run at least once against a scratch copy,
+and re-run after any version change.
+
+Also note the schedule is interval-based from container start, not wall-clock,
+so the backup hour drifts with every restart.
+
+---
+
+## 11. Repository boundary
+
+The two repositories stay independent. **No git submodules** — they would add
+ceremony without buying independence, and nothing here is compiled together.
+What actually crosses the boundary is small:
+
+- **The HTTP contract** — the admin API's shape. Documented in this repository;
+  the website does not call it at all today, since the info page is static.
+- **Brand tokens** — five CSS custom properties (`--brand-primary: #DB0016`,
+  `--brand-secondary`, `--brand-accent`, `--brand-light`, `--brand-dark`) and
+  the Chronica Pro webfont.
+
+The admin UI is served **from the Pi**, not from Pages, and lives in this
+repository alongside the API it talks to. Three reasons: it is always version-
+matched to its API; it keeps `minecraft.salesianipardubice.cz` a single origin
+with no CORS; and an administration tool should not depend on a second
+deployment pipeline being healthy, since it is the break-glass interface.
+
+It still looks like the main site: duplicating five CSS variables and two font
+files is far cheaper than coupling two repositories, and this is exactly the
+"contract, not shared source tree" principle.
+
+---
+
+## 12. Resource budget
+
+The binding constraint of the entire system is **RAM**, not disk, CPU or
+bandwidth. 8 GB total; ~805 GB of free NVMe is irrelevant by comparison.
+
+| Consumer                                     | Budget  |
+| -------------------------------------------- | ------- |
+| JVM heap                                     | 4.0 GB  |
+| JVM overhead (metaspace, GC, direct buffers) | ~0.7 GB |
+| `cloudflared`                                | ~40 MB  |
+| `admin-api`                                  | ~30 MB  |
+| `mc-backup` (idle; spikes while archiving)   | ~20 MB  |
+| OS + Docker                                  | ~0.8 GB |
+
+Every image must be `linux/arm64`.
+
+### Tuning for ~20 players
+
+`MAX_PLAYERS: 20`, and one correction to the current settings:
+
+```
+VIEW_DISTANCE: 6        SIMULATION_DISTANCE: 6     # today
+VIEW_DISTANCE: 8        SIMULATION_DISTANCE: 4     # target
 ```
 
-Plugins have two independent installation paths that do not know about each
-other. `MODRINTH_PROJECTS` entries are re-downloaded on every start and tracked
-in `data/.modrinth-manifest.json`; jars dropped into `data/plugins/` by hand
-load unconditionally. Removing a plugin therefore means removing both. Both
-current plugins — WorldEdit 7.4.5 and WorldGuard 7.0.18 — come from Modrinth.
-`data/plugins/spark/` is a leftover configuration directory whose jar is gone.
+These are routinely confused but cost very differently. *View distance* is how
+far chunks are **sent** to clients — memory and bandwidth, relatively cheap.
+*Simulation distance* is how far the server **ticks** entities, redstone, mob AI
+and growth — the expensive one, and it scales badly. Holding them equal pays
+full simulation cost for a needlessly short sight line. The target setting lets
+players see **further** than today while the server does **less** work.
 
-Image tags are pinned exactly. The Paper build is **not**: `VERSION: "LATEST"`
-resolves at every start, so a restart can move the server to a new Minecraft
-release without any change to this repository. The resolved build is recorded
-in `data/.papermc-manifest.json`.
+Heap stays at 4 GB. At ten players 3 GB would have been enough; at twenty it is
+not, and the new containers fit comfortably in the remaining headroom.
 
----
-
-## 4. State and persistence
-
-| Path | Contents | Tracked in git | Lifetime |
-|------|----------|----------------|----------|
-| `./data/world/` | The overworld and its dimensions (~14 MB) | no | the world's |
-| `./data/plugins/` | Plugin jars and their config/data | no | regenerated + persistent mix |
-| `./data/logs/` | Server logs | no | rotated by Paper |
-| `./data/paper-*.jar` | Resolved Paper build (~64 MB) | no | until `VERSION` resolves differently |
-| `./data/*.json`, `*.yml`, `*.properties` | Generated configuration | no | rewritten every start |
-| `/home/pedro/backups/` | `world-*.tar.gz` archives | no | 14 days |
-| `.env` | `SECRET_KEY` | no | host-local |
-
-`data/` is roughly 388 MB in total, dominated by the Paper jar and libraries
-rather than by the world. Against 805 GB of free NVMe, storage is not a
-constraint anywhere in this system.
-
-The only irreplaceable state is `data/world/` and `.env`. Everything else can
-be regenerated by `docker compose up -d`.
+**Load follows loaded chunks, not player count.** Twenty players building
+together in one area is markedly cheaper than five players exploring in five
+directions. A LAN party is therefore the easier of the two workloads.
+`MAX_WORLD_SIZE: 2000` is a meaningful part of this budget and stays.
 
 ---
 
-## 5. Resource budget
+## 13. Migration
 
-| | |
-|---|---|
-| Physical RAM | 8 GB |
-| JVM heap | 4 GB |
-| Observed host usage at idle | ~6.4 GB used, ~1.4 GB available, swap exhausted |
-| Observed CPU | ~1.4 % on `minecraft-server` with nobody online |
-| Load average | ~0.25 |
+Ordered, because some steps depend on others. The world is **discarded** at
+step 3: pinning to 26.1.2 is a downgrade from the 26.2 the world has already
+been saved in, and Minecraft cannot load a world backwards. That downgrade is
+being made solely to get CoreProtect ([§6](#6-version-policy)) — so step 3 is
+the one step that buys a capability at the price of the existing world, and the
+one to revisit if a CoreProtect 26.2 build appears before it is executed.
 
-RAM is the binding constraint of the entire system, and it is already tight at
-idle. Disk, CPU and bandwidth are not. Any future component has to be evaluated
-against the ~1.4 GB of headroom, not against the free disk space.
+1. Add off-box backups ([§10](#10-backups)) and **test a restore**. First,
+   because everything after this point is safer with it.
+2. Pin `VERSION: "26.1.2"`; add `squaremap` and `coreprotect` to
+   `MODRINTH_PROJECTS`.
+3. Stop the stack, move `data/world*` aside, start fresh. Verify in the log that
+   all four plugins loaded.
+4. Apply the 20-player tuning ([§12](#12-resource-budget)); reduce `OPS:` to a
+   single break-glass owner ([§7](#7-state-ownership)).
+5. Run the initial full map render overnight.
+6. Add `cloudflared`; create the `minecraft.salesianipardubice.cz` hostname;
+   publish `/mapa`.
+7. Build `admin-api` + UI; put Cloudflare Access with a GitHub organisation
+   policy in front of `/admin` and `/api/*`.
+8. Add the info page to the main website repository.
 
-All images must support `linux/arm64`.
-
----
-
-## 6. Operational model
-
-Everything is driven from the Pi's shell:
-
-- **Lifecycle** — `docker compose up -d` brings the entire stack up from a
-  clean host, given only a `.env` and an existing `/home/pedro/backups`.
-  `restart: unless-stopped` on all three services means the stack also survives
-  a reboot without intervention.
-- **Administration** — `docker exec -i minecraft-server rcon-cli` for live
-  commands; the in-game console is also available because the container runs
-  with `tty` and `stdin_open`.
-- **Health** — the image ships a healthcheck; `minecraft-server` currently
-  reports healthy. `mc-backup` uses a plain `depends_on` without a health
-  condition, so it starts before the server is ready and relies on
-  `INITIAL_DELAY` to bridge the gap.
-- **Observability** — `docker compose logs` and `docker stats` only. There is
-  no metrics collection, no alerting, and no uptime monitoring.
-
-There is no host cron, no systemd unit, and no script that has to be run by
-hand. This is deliberate: the entire system is reproducible from the compose
-file.
+`mc.salesianipardubice.cz` is not touched at any step.
 
 ---
 
-## 7. Security posture
+## 14. Security posture
 
-- **Ingress** is exclusively through the playit.gg tunnel. The Pi opens no
-  inbound ports to the internet, and the tunnel connection is established
-  outbound.
-- **Authentication** is Mojang's, via `ONLINE_MODE: "TRUE"` — accounts are
-  verified, so impersonation of a known player is not possible.
-- **Authorisation** is a single operator (`petrkucerak`, level 4) seeded from
-  the `OPS:` variable.
-- **The server is not whitelisted.** `white-list=false` and
-  `data/whitelist.json` is empty, so anyone who learns the public address can
-  join. Griefing protection relies on WorldGuard regions and on the operator
-  being present.
-- **RCON** is reachable only from within the `mcnet` bridge network. Its
-  password is generated per volume and stored in `data/server.properties`,
-  which is gitignored.
-- **Secrets** are limited to `SECRET_KEY` in `.env` (gitignored). There are no
-  credentials in the repository.
-- **Command blocks** are disabled, which removes a common redstone-based
-  privilege-escalation and lag vector.
-
----
-
-## 8. Failure modes
-
-| Failure | Effect | Recovery today |
-|---------|--------|----------------|
-| `playit` down or `SECRET_KEY` invalid | No internet access; LAN access unaffected | Container restarts itself; fix the secret |
-| playit.gg outage | Same as above | None available — the public address is theirs |
-| Paper `LATEST` resolves to a new release | Plugins may fail to load after a restart | Manual; no pinned fallback |
-| Server crash / OOM | Players disconnected | `restart: unless-stopped` brings it back |
-| World corruption | Loss since the last archive | Restore from `/home/pedro/backups` by hand |
-| Pi loses power | Everything down | Stack restarts on boot; unsaved chunks lost |
-| Disk fills | Not currently plausible (805 GB free) | — |
-
-Backup restoration has no documented procedure and has not been exercised.
+- **Ingress** is exclusively through two outbound tunnels. The Pi opens no
+  inbound ports to the internet.
+- **Player authentication** is Mojang's (`ONLINE_MODE: "TRUE"`), so a known
+  player cannot be impersonated.
+- **Server access** is by whitelist. Players are admitted through the kroužek's
+  existing enrolment process, which also handles GDPR — there is no public
+  registration form on the web, and therefore no personal data in this system
+  beyond Minecraft usernames.
+- **Admin authentication** is **Cloudflare Access with GitHub as the identity
+  provider**, authorising on membership of the **`salesianipardubice`** GitHub
+  organisation — in practice, the people who can already contribute to this
+  repository. (Access policies match reliably on organisation; whether they can
+  narrow to a specific team is to be confirmed when the policy is created.) No passwords, no
+  session handling, and no authentication code in this repository. It mirrors
+  how Sveltia CMS already authenticates against the website repository.
+- **The admin API verifies the `Cf-Access-Jwt-Assertion` JWT** rather than
+  assuming that traffic arriving on the tunnel came through Access. Cheap to
+  implement, and the difference between "secure" and "secure until something is
+  misconfigured".
+- **The admin API holds no host privilege.** No Docker socket (see
+  [§5.4](#54-admin-api-new)); its entire blast radius is the set of RCON
+  commands it chooses to expose.
+- **RCON** is reachable only from within `mcnet`, never published to the host.
+  Its password is generated per volume and stored in gitignored files.
+- **Secrets** are the playit and cloudflared tokens and the R2 credentials, all
+  in `.env`, gitignored. No credentials in the repository.
 
 ---
 
-## 9. Open questions
+## 15. Failure modes
 
-Deliberately unresolved; to be answered when the target architecture is
-designed.
+| Failure                          | Effect on the game                                       | Effect on the web                                          |
+| -------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------- |
+| `playit` or playit.gg down       | no remote play; **LAN play unaffected**                  | none                                                       |
+| `cloudflared` or Cloudflare down | **none**                                                 | map and admin unreachable; info page still served by Pages |
+| Map renderer misbehaving         | heap/CPU pressure; throttle or disable it                | stale tiles                                                |
+| `admin-api` down                 | none                                                     | admin unreachable; RCON over SSH still works               |
+| Server crash / OOM               | players disconnected; `restart: unless-stopped` recovers | map goes stale                                             |
+| Grief                            | —                                                        | rollback via CoreProtect, not a world restore              |
+| World corruption                 | loss back to the last archive                            | —                                                          |
+| Pi loses power or uplink         | everything down                                          | info page still served                                     |
+| Disk full                        | implausible — 805 GB free                                | —                                                          |
 
-1. Should `VERSION` be pinned to an exact Paper release rather than `LATEST`?
-2. Should the whitelist be enabled, and if so, who maintains it and how?
-3. Who operates the server besides the repository owner, and do they need a
-   path that does not involve SSH to the Pi?
-4. Does the project need a web presence, and if so what does it actually do?
-5. Is 24 h interval-based backup with 14-day retention the right policy for an
-   event-driven server, and where should a second copy live?
-6. What is the restore procedure, and how is it tested?
-7. Is any monitoring or alerting needed, given that failures currently surface
-   only when a player complains?
+The pattern to preserve: no failure in the right-hand column can cause one in
+the left.
+
+---
+
+## 16. Open questions
+
+Resolved during design; recorded because the reasoning matters later.
+
+- **Plugin behaviour on an unsupported version** — assumed to be refusal, and
+  the supported version is prioritised accordingly. Not measured; if a
+  CoreProtect 26.2 build appears, the question becomes moot.
+- **Off-box retention** — 14 daily / 8 weekly / 12 monthly via restic,
+  [§10](#10-backups).
+- **Map render scheduling** — a fixed night window, not player-count driven,
+  [§9](#9-map).
+- **Admin group** — the `salesianipardubice` GitHub organisation,
+  [§14](#14-security-posture).
+
+Still open:
+
+1. **Is kroužek enrolment the only route onto the server, permanently?**
+   Today's design says yes, and that is precisely what lets the whole cloud side
+   stay static with no database anywhere. The question is whether someone
+   *outside* the kroužek will eventually need to ask for access — a sibling, a
+   friend of a player, an alumnus who moved away. If that day comes, they need a
+   request form, a form needs somewhere to hold pending requests until an admin
+   decides, and that reintroduces web-side state and a database.
+
+   Nothing needs deciding now: the architecture can absorb it later by adding a
+   pending-request store on the cloud side, without disturbing the rule that the
+   Minecraft server remains the source of truth for the whitelist itself. It is
+   worth knowing whether to expect it.

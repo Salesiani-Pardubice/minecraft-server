@@ -98,12 +98,23 @@ indentation silently becomes part of the value. Always verify with
 Container images are pinned to exact tags and bumping one is a deliberate edit
 followed by `docker compose pull && docker compose up -d`.
 
-`VERSION: "LATEST"` is **not** pinned — the image resolves the newest Paper
-build on every start. Currently resolved to **Paper 26.2 build 123**
-(`data/paper-26.2-123.jar`, recorded in `data/.papermc-manifest.json`).
-This means a restart can silently move the server to a new Minecraft version
-and break plugins mid-event. Pinning `VERSION` to the exact release is the
-safer choice before a LAN party; treat it as an open decision, not settled.
+`VERSION` is pinned to an exact Paper release, chosen as the **intersection of
+plugin support** rather than the newest available build — see
+[`ARCHITECTURE.md` §6](./ARCHITECTURE.md#6-version-policy). `LATEST` is
+forbidden: it once moved this server to 26.2 ahead of the plugin ecosystem, and
+because Minecraft cannot load a world backwards, that could not be undone
+without discarding the world. The resolved build is recorded in
+`data/.papermc-manifest.json`.
+
+Before bumping `VERSION`, confirm on Modrinth that **every** plugin in
+`MODRINTH_PROJECTS` lists the candidate version. Query the API rather than
+reading the project page, and do not trust the first few entries — Modrinth
+does not return versions in semver order:
+
+```sh
+curl -s 'https://api.modrinth.com/v2/project/<slug>/version?loaders=%5B%22paper%22%5D' \
+  | python3 -c 'import json,sys; print([v["version_number"] for v in json.load(sys.stdin) if "<mc-version>" in v["game_versions"]])'
+```
 
 ## Plugins
 
@@ -214,9 +225,10 @@ ls -lh /home/pedro/backups
 Mismatches between the documentation and the running system. Re-check each one
 before relying on it — they may already be fixed by the time you read this.
 
-- `README.md` states image `...-java21` and Paper `1.21.11`. The compose file
-  actually uses `...-java25` and `VERSION: "LATEST"`, which currently resolves
-  to Paper 26.2 build 123.
+- `README.md` states image `...-java21` and Paper `1.21.11`, and still
+  describes the stack as three services. Both are stale — see
+  [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the target, which adds
+  `cloudflared` and `admin-api`.
 - `README.md` lists WorldEdit and WorldGuard as manual jars in `data/plugins/`.
   Both are in fact managed by `MODRINTH_PROJECTS` and re-downloaded on every
   start.
