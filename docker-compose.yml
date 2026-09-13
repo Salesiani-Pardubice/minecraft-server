@@ -75,6 +75,38 @@ services:
     networks:
       - mcnet
 
+  admin-api:
+    build: ./admin-api
+    image: salesiani/minecraft-admin-api:0.1.0
+    container_name: admin-api
+    environment:
+      TZ: "Europe/Prague"
+      ADDR: ":8080"
+      MAP_DIR: "/srv/map"
+    volumes:
+      # squaremap renders static tiles here; we serve them directly rather than
+      # exposing the plugin's own webserver.
+      - ./data/plugins/squaremap/web:/srv/map:ro
+    depends_on:
+      - minecraft-server
+    restart: unless-stopped
+    networks:
+      - mcnet
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.9.1
+    container_name: cloudflared
+    command: tunnel --no-autoupdate run
+    environment:
+      # Passed by environment rather than on the command line, so the token
+      # does not show up in `ps` output for every local user.
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - minecraft-server
+    restart: unless-stopped
+    networks:
+      - mcnet
+
   playit:
     image: ghcr.io/playit-cloud/playit-agent:0.16
     container_name: playit-agent

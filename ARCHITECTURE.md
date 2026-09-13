@@ -319,8 +319,25 @@ squaremap runs inside the server JVM, so its render buffers compete with
 gameplay for the same 4 GB heap — the reason to throttle during play is heap
 pressure and CPU inside the JVM, not host memory.
 
-Exact configuration keys (background render interval, thread count) are to be
-determined against the pinned squaremap build rather than assumed.
+The relevant keys in `plugins/squaremap/config.yml`, as of 1.3.13.1:
+`internal-webserver.enabled` (**disabled** — `admin-api` serves the tiles, so
+the plugin's own HTTP server is a redundant second surface),
+`max-render-threads` (set to **2**, leaving two of the Pi's four cores for the
+tick loop; the default `-1` means all of them), and
+`background-render.{enabled,max-chunks-per-interval,interval-seconds}`.
+
+Measured on the freshly generated world: a full render of all three dimensions
+took **5 seconds** at ~1000 chunks/s. The "run it overnight" caution applies to
+a world with substantial explored territory, not to a new one.
+
+> **Reproducibility gap.** This file lives under `data/`, which is gitignored,
+> and the settings above were applied by hand. `docker compose up -d` on a clean
+> host would therefore *not* reproduce them — a direct violation of principle 6.
+> Plugin configuration is unlike server configuration: the image regenerates
+> `server.properties` from the compose file, but it does not manage plugin
+> configs at all. Closing this needs a deliberate mechanism (a versioned file
+> bind-mounted into place, or the image's config-patching support). Until then
+> the settings are undocumented state on one machine.
 
 ---
 
@@ -481,11 +498,16 @@ one to revisit if a CoreProtect 26.2 build appears before it is executed.
    be re-added after the admin panel removed it. The admin API is the only
    writer; operators bypass the whitelist, which is how the first administrator
    gets in while the list is still empty.
-5. Run the initial full map render overnight.
-6. Add `cloudflared`; create the `minecraft.salesianipardubice.cz` hostname;
-   publish `/mapa`.
-7. Build `admin-api` + UI; put Cloudflare Access with a GitHub organisation
-   policy in front of `/admin` and `/api/*`.
+5. ✅ Run the initial full map render — 5 s on the new world, no overnight
+   window needed.
+6. ✅ Add `cloudflared` (pinned `2026.9.1`, token from `.env`, on `mcnet`).
+   ⏳ The public hostname must still be routed to `admin-api:8080` in the
+   Cloudflare dashboard: a token-based tunnel takes its ingress rules from
+   Cloudflare, not from a local config file, so this step cannot be done from
+   the repository.
+7. ⏳ `admin-api` exists and serves `/mapa` and `/healthz`
+   ([§5.4](#54-admin-api-new)). Still to build: `/admin`, `/api/*`, RCON
+   wiring, and the Cloudflare Access policy in front of them.
 8. Add the info page to the main website repository.
 9. Close the deferred off-box backup ([§10](#10-backups)).
 
