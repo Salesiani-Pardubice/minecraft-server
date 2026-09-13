@@ -31,6 +31,7 @@ services:
       SPAWN_PROTECTION: "0"
       ONLINE_MODE: "TRUE"
       ENABLE_WHITELIST: "TRUE"
+      RCON_PASSWORD: ${RCON_PASSWORD:?RCON_PASSWORD must be set in .env}
       # Break-glass owner only. Ops are managed through the admin panel over
       # RCON; this list is MERGEd on every start, so any name left here would
       # be silently re-added after being removed. See ARCHITECTURE.md section 7.
@@ -77,7 +78,7 @@ services:
 
   admin-api:
     build: ./admin-api
-    image: salesiani/minecraft-admin-api:0.2.0
+    image: salesiani/minecraft-admin-api:0.3.0
     container_name: admin-api
     environment:
       TZ: "Europe/Prague"
@@ -88,10 +89,16 @@ services:
       # closed by default rather than open by accident.
       ACCESS_TEAM_DOMAIN: ${ACCESS_TEAM_DOMAIN:-}
       ACCESS_AUD: ${ACCESS_AUD:-}
+      RCON_ADDR: "minecraft-server:25575"
+      RCON_PASSWORD: ${RCON_PASSWORD:?RCON_PASSWORD must be set in .env}
     volumes:
       # squaremap renders static tiles here; we serve them directly rather than
       # exposing the plugin's own webserver.
       - ./data/plugins/squaremap/web:/srv/map:ro
+      # Read-only, for ops.json: Minecraft has no RCON command that lists
+      # operators. Mounted as a directory rather than a single file because the
+      # server replaces ops.json on write, which would strand a file bind mount.
+      - ./data:/srv/mcdata:ro
     depends_on:
       - minecraft-server
     restart: unless-stopped

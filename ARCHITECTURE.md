@@ -209,6 +209,14 @@ Exposed operations:
 | restart the server                              | RCON `stop`                      |
 | `GET /api/identity` — echo the verified Access identity | claims from the assertion |
 
+Implemented as `GET /api/status`, `GET|POST /api/whitelist`,
+`DELETE /api/whitelist/{name}`, `GET|POST /api/ops`, `DELETE /api/ops/{name}`
+and `POST /api/restart`. Player names are validated against
+`^[A-Za-z0-9_]{3,16}$` and restart announcements are flattened to one line, so
+neither can smuggle a second command onto an RCON line. Every mutation is logged
+with the identity that made it; there is no separate audit store, since the
+container log is where an operator already looks.
+
 `/api/identity` is a diagnostic: it reports exactly which claims Cloudflare
 forwarded to the origin. An Access policy that authenticates but refuses to
 authorise is otherwise hard to tell apart from one that fails to authenticate at
@@ -580,7 +588,16 @@ one to revisit if a CoreProtect 26.2 build appears before it is executed.
   [§5.4](#54-admin-api-new)); its entire blast radius is the set of RCON
   commands it chooses to expose.
 - **RCON** is reachable only from within `mcnet`, never published to the host.
-  Its password is generated per volume and stored in gitignored files.
+  `RCON_PASSWORD` is set explicitly from `.env` and shared by the server and
+  `admin-api`. Leaving it unset makes the image generate a value only it knows,
+  which is fine for `rcon-cli` inside the container but leaves nothing for a
+  second service to authenticate with.
+- **`admin-api` mounts `data/` read-only**, because Minecraft offers no RCON
+  command that lists operators and `ops.json` must be read directly. This does
+  put `server.properties`, and therefore the RCON password, inside that
+  container — but it already holds the same password by environment, so nothing
+  new is exposed. The mount is a directory rather than a single file because the
+  server replaces `ops.json` on write, which would strand a file bind mount.
 - **Secrets** are the playit and cloudflared tokens and the R2 credentials, all
   in `.env`, gitignored. No credentials in the repository.
 

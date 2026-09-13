@@ -45,7 +45,11 @@ func main() {
 	mux.HandleFunc("GET /{$}", redirectTo("/mapa/"))
 
 	// Behind Cloudflare Access.
-	mux.Handle("GET /api/identity", verifier.requireAccess(http.HandlerFunc(handleIdentity)))
+	mc := newMCClient(os.Getenv("RCON_ADDR"), os.Getenv("RCON_PASSWORD"), envOr("MC_DATA_DIR", "/srv/mcdata"))
+	if !mc.configured() {
+		log.Print("WARNING: RCON_ADDR or RCON_PASSWORD is unset - the API cannot reach the server")
+	}
+	(&api{mc: mc}).routes(mux, verifier.requireAccess)
 	mux.Handle("GET /admin", verifier.requireAccess(http.HandlerFunc(handleAdmin)))
 
 	srv := &http.Server{

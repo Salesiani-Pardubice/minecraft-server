@@ -162,11 +162,11 @@ SECRET_KEY=<playit.gg agent secret>
 
 Without it only `playit` fails; the server still runs on `localhost:25565`.
 
-`RCON_PASSWORD` is **not** set, so the image generates a random one per volume
-and persists it in `data/server.properties` and `data/.rcon-cli.env`. Treat
-that value as a secret: never print it into logs, docs, commit messages, or
-commands you echo back. If RCON ever needs to be reachable by something outside
-the compose network, set `RCON_PASSWORD` from `.env` instead.
+`RCON_PASSWORD` is set explicitly in `.env` and shared by `minecraft-server`
+and `admin-api`, which needs it to reach the server at all. Treat it as a
+secret: never print it into logs, docs, commit messages, or commands you echo
+back. Changing it requires recreating `minecraft-server`, since the value is
+written into `data/server.properties` at startup.
 
 ## Common commands
 
