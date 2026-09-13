@@ -42,11 +42,17 @@ Consequences for every change you propose:
 ```
 docker-compose.yml   # the entire stack + the entire server configuration
 README.md            # Czech, for humans running the LAN party
-CLAUDE.md            # legacy agent notes — see "Known drift" below
+ARCHITECTURE.md      # English, the system as currently deployed
 AGENTS.md            # this file
 .env                 # gitignored, must exist on the host
 data/                # gitignored, bind-mounted server volume (generated)
 ```
+
+Git history contains two removed documents — an architecture specification
+(deleted in `b7244c3`) and a `CLAUDE.md` (deleted in `bfde034`) — that
+described an Astro + Cloudflare Pages frontend and a `sync-agent` service.
+**Neither was ever built.** Do not resurrect them from history as if they
+described reality; `ARCHITECTURE.md` is the current source of truth.
 
 There is no application source code, no build step, and no package manager in
 this repo. It is configuration only.
@@ -205,20 +211,24 @@ ls -lh /home/pedro/backups
 
 ## Known drift (as of 2026-09-13)
 
-Do not trust these claims without re-checking — they are stale in the current
-docs and may already be fixed by the time you read this:
+Mismatches between the documentation and the running system. Re-check each one
+before relying on it — they may already be fixed by the time you read this.
 
-- `CLAUDE.md` describes a `web/` frontend (Astro + Cloudflare Pages) and a
-  `sync-agent/` service. **Neither exists in the repo** — the architecture
-  specification was removed in commit `b7244c3`. Redesigning that is the
-  purpose of the upcoming `ARCHITECTURE.md`.
-- `CLAUDE.md` and `README.md` state image `...-java21` and
-  `VERSION: "1.21.11"`. The compose file actually uses `...-java25` and
-  `VERSION: "LATEST"`, currently resolving to Paper 26.2.
-- `CLAUDE.md` lists WorldEdit / WorldGuard as "manual jars". They are in fact
-  managed by `MODRINTH_PROJECTS`.
+- `README.md` states image `...-java21` and Paper `1.21.11`. The compose file
+  actually uses `...-java25` and `VERSION: "LATEST"`, which currently resolves
+  to Paper 26.2 build 123.
+- `README.md` lists WorldEdit and WorldGuard as manual jars in `data/plugins/`.
+  Both are in fact managed by `MODRINTH_PROJECTS` and re-downloaded on every
+  start.
+- `data/plugins/spark/` is a leftover configuration directory for a plugin that
+  is no longer installed.
 - `motd` is still the default `A Minecraft Server`. `SERVER_NAME` sets
   `server-name`, not the MOTD shown in the client's server list — that needs a
   separate `MOTD` env var.
 - `whitelist.json` is empty and `white-list=false`: the server is open to
   anyone who finds the tunnel address.
+- `mc-backup` uses a bare `depends_on` without `condition: service_healthy`,
+  so it starts before the server is ready and relies on `INITIAL_DELAY: 2m`
+  to cover the gap.
+- Restoring from a backup archive has no documented procedure and has never
+  been exercised.
