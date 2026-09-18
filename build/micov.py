@@ -25,6 +25,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools"))
 from mc import Session
+from parts import (clear_growth, cone, follow, gable, gable_end, level, line,
+                   perimeter, profile, route, shell, trace, tree)
 from terrain_survey import ground_grid
 
 # --- where the village sits --------------------------------------------------
@@ -48,13 +50,6 @@ GLASS       = "black_stained_glass_pane"
 FLOOR       = "polished_andesite"
 PAVING      = "andesite"                # the swept paving round the parish house
 LANE        = "dirt_path"
-
-# Stair facings for a roof course, by which side of the ridge it is on.
-# A stair "faces" the direction it descends towards, which is the opposite of
-# what reads naturally when writing the loop - the first attempt had every
-# pitch inverted, and an inverted pitch leaks rain.
-DOWN_N, DOWN_S = "south", "north"
-DOWN_W, DOWN_E = "east", "west"
 
 # --- the church --------------------------------------------------------------
 # A cruciform plan: the tower stands at the south-west corner with the entrance
@@ -192,95 +187,10 @@ def finished(grid):
     return out
 
 
-def trace(points, width=0):
-    """Rasterise a polyline into a set of cells, optionally thickened."""
-    cells = set()
-    for (au, av), (bu, bv) in zip(points, points[1:]):
-        steps = max(abs(bu - au), abs(bv - av))
-        for i in range(steps + 1):
-            t = i / steps if steps else 0
-            u = round(au + (bu - au) * t)
-            v = round(av + (bv - av) * t)
-            for du in range(-width, width + 1):
-                for dv in range(-width, width + 1):
-                    if abs(du) + abs(dv) <= width:
-                        cells.add((u + du, v + dv))
-    return cells
-
-
 # --- ground ------------------------------------------------------------------
-
-def _column(s, v, key, ua, ub):
-    """Raise or cut one run of columns to its target, then cap it with turf."""
-    tgt, nat, top = key
-    if tgt > nat:
-        s.fill((ua, nat, v), (ub, tgt - 1, v), "dirt")
-    elif tgt < nat:
-        s.fill((ua, tgt + 1, v), (ub, nat + 24, v), "air")
-    s.fill((ua, tgt, v), (ub, tgt, v), top)
-
-
-def level(s, grid, box, y, top="grass_block", blend=0, cells=None):
-    """Flatten a footprint to y, easing out over `blend` blocks if asked.
-
-    Runs of equal (target, natural) are filled in one command; a 43 by 35
-    churchyard is a few hundred commands rather than fifteen hundred.
-    """
-    u1, v1, u2, v2 = box
-    for v in range(v1 - blend, v2 + blend + 1):
-        run = None
-        for u in range(u1 - blend, u2 + blend + 1):
-            nat = grid.get((u, v))
-            d = max(max(u1 - u, 0, u - u2), max(v1 - v, 0, v - v2))
-            if cells is not None and d == 0 and (u, v) not in cells:
-                nat = None
-            if nat is None:
-                tgt = None
-            elif d == 0:
-                tgt = y
-            elif blend:
-                t = min(d / blend, 1.0)
-                t = t * t * (3 - 2 * t)                  # smoothstep
-                tgt = round(y * (1 - t) + nat * t)
-            else:
-                continue
-            if tgt is None:
-                if run:
-                    _column(s, v, *run)
-                run = None
-                continue
-            key = (tgt, nat, top)
-            if run and run[0] == key:
-                run = (key, run[1], u)
-            else:
-                if run:
-                    _column(s, v, *run)
-                run = (key, u, u)
-        if run:
-            _column(s, v, *run)
 
 
 FORCE = False
-# One mask per command: WorldEdit reads "##logs,##leaves" as a single tag
-# named "logs,##leaves" and rejects the lot, which is how the first clearing
-# pass reported success and felled nothing.
-GROWTH = ("##logs", "##leaves", "##saplings", "##flowers", "vine",
-          "dead_bush", "sweet_berry_bush", "moss_carpet")
-
-
-def clear_growth(s, box, y, margin=3, up=26, down=4):
-    """Fell whatever is growing over a site before anything is built on it.
-
-    The ground survey looks past foliage on purpose, so a levelled pad can
-    come out with a full-grown oak standing in the middle of it and the
-    building disappears into the wood. Clearing first is the only way the
-    pads read as a site.
-    """
-    u1, v1, u2, v2 = box
-    s.sel((u1 - margin, y - down, v1 - margin),
-          (u2 + margin, y + up, v2 + margin))
-    for mask in GROWTH:
-        s.raw(f"//replace {mask} air")
 
 
 def terrain(s, grid=None):
@@ -335,81 +245,39 @@ def terrain(s, grid=None):
 
 # --- the church --------------------------------------------------------------
 
+
+# --- the village palette, wrapped round the generic parts -------------------
+
 def _shell(s, b, top, wall, floor_y=None, base=None):
-    """Plinth, walls, hollow interior."""
-    base = Y if base is None else base
-    s.fill((b["x1"], base, b["z1"]), (b["x2"], base + 1, b["z2"]), PLINTH)
-    s.walls((b["x1"], base + 2, b["z1"]), (b["x2"], top, b["z2"]), wall)
-    s.fill((b["x1"] + 1, base + 1, b["z1"] + 1),
-           (b["x2"] - 1, top, b["z2"] - 1), "air")
-    if floor_y is not None:
-        s.fill((b["x1"] + 1, floor_y, b["z1"] + 1),
-               (b["x2"] - 1, floor_y, b["z2"] - 1), FLOOR)
+    shell(s, b, top, wall, Y if base is None else base, floor_y, PLINTH, FLOOR)
 
 
 def _gable(s, b, eaves, along, roof=ROOF, stair=ROOF_STAIR):
-    """A pitched roof over b, ridge running along 'x' or 'z'.
-
-    Courses are laid inward from both eaves. The last one or two courses are
-    solid blocks rather than stairs: a pair of opposing stairs meeting at the
-    apex leaves a hole, which is how rain gets in.
-    """
-    if along == "x":
-        lo, hi, f1, f2 = b["z1"], b["z2"], b["x1"], b["x2"]
-        low_face, high_face = DOWN_N, DOWN_S
-    else:
-        lo, hi, f1, f2 = b["x1"], b["x2"], b["z1"], b["z2"]
-        low_face, high_face = DOWN_W, DOWN_E
-
-    def row(w, y, block):
-        if along == "x":
-            s.fill((f1, y, w), (f2, y, w), block)
-        else:
-            s.fill((w, y, f1), (w, y, f2), block)
-
-    def clear(a, c, y):
-        if a + 1 > c - 1:
-            return
-        if along == "x":
-            s.fill((f1, y, a + 1), (f2, y, c - 1), "air")
-        else:
-            s.fill((a + 1, y, f1), (c - 1, y, f2), "air")
-
-    i = 0
-    while True:
-        y, a, c = eaves + 1 + i, lo + i, hi - i
-        if a > c:
-            break
-        if c - a <= 1:                       # ridge course, solid
-            row(a, y, roof)
-            if c != a:
-                row(c, y, roof)
-            break
-        row(a, y, f"{stair}[facing={low_face}]")
-        row(c, y, f"{stair}[facing={high_face}]")
-        clear(a, c, y)
-        i += 1
-    return eaves + 1 + i
+    return gable(s, b, eaves, along, roof, stair)
 
 
 def _fill_gable_end(s, b, eaves, along, wall):
-    """Close the triangular ends under a pitched roof."""
-    if along == "x":
-        lo, hi = b["z1"], b["z2"]
-        for i in range((hi - lo) // 2 + 2):
-            a, c = lo + i, hi - i
-            if a > c:
-                break
-            for x in (b["x1"], b["x2"]):
-                s.fill((x, eaves + i, a), (x, eaves + i, c), wall)
-    else:
-        lo, hi = b["x1"], b["x2"]
-        for i in range((hi - lo) // 2 + 2):
-            a, c = lo + i, hi - i
-            if a > c:
-                break
-            for z in (b["z1"], b["z2"]):
-                s.fill((a, eaves + i, z), (c, eaves + i, z), wall)
+    gable_end(s, b, eaves, along, wall)
+
+
+def _tree(s, u, v, y, h=5, log="oak_log", leaf="oak_leaves"):
+    tree(s, u, v, y, h, log, leaf)
+
+
+def _follow(s, cells, grid, build, clear=12):
+    follow(s, cells, grid, build, clear)
+
+
+def _perimeter(box, inset=0):
+    return perimeter(box, inset)
+
+
+def _line(points):
+    return line(points)
+
+
+def _profile(cells, grid):
+    return profile(cells, grid)
 
 
 def church(s):
@@ -490,20 +358,6 @@ GRAVE_STONE = ["polished_andesite", "stone_bricks", "mossy_cobblestone",
 GRAVE_TOP = ["andesite", "gravel", "cobblestone", "stone_bricks"]
 
 
-def _perimeter(box, inset=0):
-    """The ring of cells one block wide round a box."""
-    u1, v1, u2, v2 = box
-    u1, v1, u2, v2 = u1 + inset, v1 + inset, u2 - inset, v2 - inset
-    ring = set()
-    for u in range(u1, u2 + 1):
-        ring.add((u, v1))
-        ring.add((u, v2))
-    for v in range(v1, v2 + 1):
-        ring.add((u1, v))
-        ring.add((u2, v))
-    return ring
-
-
 def _cross(s, u, v, y, stem="cobblestone_wall", high=4):
     """A wayside or memorial cross."""
     s.fill((u, y, v), (u, y + high, v), stem)
@@ -574,18 +428,6 @@ def graveyard(s):
 
 
 # --- trees -------------------------------------------------------------------
-
-def _tree(s, u, v, y, h=5, log="oak_log", leaf="oak_leaves"):
-    """One specimen tree, placed rather than scattered, so it lands where the
-    plan puts it - the map marks single trees, not a wood."""
-    top = y + h
-    s.fill((u - 2, top - 2, v - 2), (u + 2, top - 1, v + 2), leaf)
-    for du, dv in ((-2, -2), (-2, 2), (2, -2), (2, 2)):
-        s.fill((u + du, top - 2, v + dv), (u + du, top - 1, v + dv), "air")
-    s.fill((u - 1, top, v - 1), (u + 1, top, v + 1), leaf)
-    s.fill((u - 1, top + 1, v), (u + 1, top + 1, v), leaf)
-    s.fill((u, top + 1, v - 1), (u, top + 1, v + 1), leaf)
-    s.fill((u, y, v), (u, top, v), log)
 
 
 # --- the parish house, its workshop and its washroom -------------------------
@@ -713,21 +555,6 @@ def pergola(s):
             "lantern[hanging=true]")
 
 
-def _follow(s, cells, grid, build, clear=12):
-    """Run `build(u, v, y)` over cells, at whatever height the ground is.
-
-    Whatever stood there is taken down first, so running a stage twice
-    rebuilds it rather than adding a course to it.
-    """
-    for u, v in sorted(cells):
-        y = grid.get((u, v))
-        if y is None:
-            continue
-        if clear:
-            s.fill((u, y + 1, v), (u, y + clear, v), "air")
-        build(u, v, y)
-
-
 def fara(s, grid=None):
     """The whole parish plot: buildings, the boundary wall and the garden."""
     grid = finished(grid or survey())
@@ -794,70 +621,6 @@ def orchard(s, grid=None):
 GARDEN_WALK = [(46, -3), (48, -6), (48, -16), (58, -17), (63, -17)]
 DOOR_SPUR   = [(59, -17), (59, -15)]
 SHOP_WALK   = [(63, -17), (72, -17), (77, -22), (77, -30), (76, -31)]
-
-
-def _profile(line, grid):
-    """Heights along a line, eased so the walk never steps more than a block.
-
-    The churchyard stands three blocks above the lane, so the path has to
-    climb; left at ground level it would run into the face of the retaining
-    wall instead of over it.
-    """
-    ys = []
-    last = None
-    for c in line:
-        h = grid.get(c)
-        ys.append(h if h is not None else last)
-        last = ys[-1]
-    if ys[0] is None:
-        return None
-    for i in range(1, len(ys)):
-        if ys[i] is None:
-            ys[i] = ys[i - 1]
-    for _ in range(3):
-        for i in range(1, len(ys)):
-            ys[i] = max(ys[i - 1] - 1, min(ys[i - 1] + 1, ys[i]))
-        for i in range(len(ys) - 2, -1, -1):
-            ys[i] = max(ys[i + 1] - 1, min(ys[i + 1] + 1, ys[i]))
-    return ys
-
-
-def _line(points):
-    """Ordered centre cells of a polyline, without repeats."""
-    line = []
-    for (au, av), (bu, bv) in zip(points, points[1:]):
-        steps = max(abs(bu - au), abs(bv - av))
-        for i in range(steps + 1):
-            t = i / steps if steps else 0
-            c = (round(au + (bu - au) * t), round(av + (bv - av) * t))
-            if not line or line[-1] != c:
-                line.append(c)
-    return line
-
-
-def route(s, grid, points, surface=LANE, width=1, bed="dirt"):
-    """Lay a way along a polyline, cutting and packing it level as it goes."""
-    line = _line(points)
-    ys = _profile(line, grid)
-    if ys is None:
-        return
-    done = set()
-    for (u, v), y in zip(line, ys):
-        for du in range(-width, width + 1):
-            for dv in range(-width, width + 1):
-                if abs(du) + abs(dv) > width:
-                    continue
-                c = (u + du, v + dv)
-                if c in done:
-                    continue
-                done.add(c)
-                g = grid.get(c, y)
-                if g < y:
-                    s.fill((c[0], g, c[1]), (c[0], y - 1, c[1]), bed)
-                elif g > y:
-                    s.fill((c[0], y + 1, c[1]), (c[0], g + 3, c[1]), "air")
-                s.block((c[0], y, c[1]), surface)
-                s.fill((c[0], y + 1, c[1]), (c[0], y + 3, c[1]), "air")
 
 
 def paths(s, grid=None):
