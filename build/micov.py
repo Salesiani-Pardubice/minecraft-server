@@ -207,8 +207,18 @@ def level(s, grid, box, y, top="grass_block", blend=0, cells=None):
 
 
 def terrain(s, grid=None):
-    """Level the churchyard, and a pad under each building of the parish."""
+    """Level the churchyard, and a pad under each building of the parish.
+
+    Only ever run this on bare ground. The survey reports the highest solid
+    block, and a roof is a solid block, so levelling a site that is already
+    built on reads the church as a hill and cuts it down to the platform -
+    which is exactly what happened the first time it was run out of order.
+    """
     grid = grid or survey()
+    standing = grid.get((NAVE["x1"] + 2, NAVE["z1"]))
+    if standing is not None and standing > Y + 3:
+        sys.exit("terrain: the church is standing at this site - levelling "
+                 "would cut it down. Run terrain before church.")
     keep = yard_cells()
     level(s, grid, YARD, Y, cells=keep)
 
