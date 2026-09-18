@@ -125,8 +125,9 @@ def trace(points, width=0):
     for (au, av), (bu, bv) in zip(points, points[1:]):
         steps = max(abs(bu - au), abs(bv - av))
         for i in range(steps + 1):
-            u = round(au + (bu - au) * i / steps)
-            v = round(av + (bv - av) * i / steps)
+            t = i / steps if steps else 0
+            u = round(au + (bu - au) * t)
+            v = round(av + (bv - av) * t)
             for du in range(-width, width + 1):
                 for dv in range(-width, width + 1):
                     if abs(du) + abs(dv) <= width:
@@ -383,7 +384,8 @@ def graveyard(s):
 
     # Railing on top, in the grey the map draws round the graveyard: stone
     # posts every four blocks with iron between them, open at the two gates.
-    gates = trace([GATE_E, GATE_E], width=1) | trace([GATE_W, GATE_W], width=1)
+    gates = {(g[0] + du, g[1] + dv) for g in (GATE_E, GATE_W)
+             for du in (-1, 0, 1) for dv in (-1, 0, 1)}
     for u, v in sorted(_perimeter(YARD)):
         if (u, v) in gates:
             continue
@@ -636,3 +638,205 @@ def orchard(s, grid=None):
     s.block((fu, fy, fv), "campfire")
     for du, dv in ((-3, 0), (3, 0), (0, -3), (0, 3)):
         s.block((fu + du, fy + 1, fv + dv), "oak_log[axis=x]")
+
+
+# --- ways --------------------------------------------------------------------
+
+GARDEN_WALK = [(44, -3), (48, -6), (48, -16), (58, -17), (63, -17)]
+DOOR_SPUR   = [(59, -17), (59, -15)]
+SHOP_WALK   = [(63, -17), (70, -19), (75, -24), (76, -31)]
+
+
+def _profile(line, grid):
+    """Heights along a line, eased so the walk never steps more than a block.
+
+    The churchyard stands three blocks above the lane, so the path has to
+    climb; left at ground level it would run into the face of the retaining
+    wall instead of over it.
+    """
+    ys = []
+    last = None
+    for c in line:
+        h = grid.get(c)
+        ys.append(h if h is not None else last)
+        last = ys[-1]
+    if ys[0] is None:
+        return None
+    for i in range(1, len(ys)):
+        if ys[i] is None:
+            ys[i] = ys[i - 1]
+    for _ in range(3):
+        for i in range(1, len(ys)):
+            ys[i] = max(ys[i - 1] - 1, min(ys[i - 1] + 1, ys[i]))
+        for i in range(len(ys) - 2, -1, -1):
+            ys[i] = max(ys[i + 1] - 1, min(ys[i + 1] + 1, ys[i]))
+    return ys
+
+
+def _line(points):
+    """Ordered centre cells of a polyline, without repeats."""
+    line = []
+    for (au, av), (bu, bv) in zip(points, points[1:]):
+        steps = max(abs(bu - au), abs(bv - av))
+        for i in range(steps + 1):
+            t = i / steps if steps else 0
+            c = (round(au + (bu - au) * t), round(av + (bv - av) * t))
+            if not line or line[-1] != c:
+                line.append(c)
+    return line
+
+
+def route(s, grid, points, surface=LANE, width=1, bed="dirt"):
+    """Lay a way along a polyline, cutting and packing it level as it goes."""
+    line = _line(points)
+    ys = _profile(line, grid)
+    if ys is None:
+        return
+    done = set()
+    for (u, v), y in zip(line, ys):
+        for du in range(-width, width + 1):
+            for dv in range(-width, width + 1):
+                if abs(du) + abs(dv) > width:
+                    continue
+                c = (u + du, v + dv)
+                if c in done:
+                    continue
+                done.add(c)
+                g = grid.get(c, y)
+                if g < y:
+                    s.fill((c[0], g, c[1]), (c[0], y - 1, c[1]), bed)
+                elif g > y:
+                    s.fill((c[0], y + 1, c[1]), (c[0], g + 3, c[1]), "air")
+                s.block((c[0], y, c[1]), surface)
+                s.fill((c[0], y + 1, c[1]), (c[0], y + 3, c[1]), "air")
+
+
+def paths(s, grid=None):
+    """The lane, the field track, and the walk from the parish to the porch."""
+    grid = grid or survey()
+    route(s, grid, LANE_RUN, LANE, width=1)
+    route(s, grid, TRACK, "coarse_dirt", width=0)
+    # Orange on the map: garden, lane, east gate, north side, west porch.
+    u1, v1, u2, v2 = YARD
+    inside = [c for c in _line(WALK) if u1 <= c[0] <= u2 and v1 <= c[1] <= v2]
+    route(s, grid, WALK, LANE, width=1)
+    for u, v in inside:                          # gravel once inside the gates
+        for du, dv in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)):
+            if u1 <= u + du <= u2 and v1 <= v + dv <= v2:
+                s.block((u + du, Y, v + dv), "gravel")
+    for pts in (GARDEN_WALK, DOOR_SPUR, SHOP_WALK):
+        route(s, grid, pts, PAVING, width=0)
+    # A wayside cross where the walk leaves the lane, as the map marks it.
+    cy = grid.get((26, -2), Y - 3)
+    _cross(s, 26, -2, cy + 1, high=4)
+
+
+def lights(s, grid=None):
+    """Lanterns on posts along the ways, and hung inside the church."""
+    grid = grid or survey()
+    for pts in (WALK, GARDEN_WALK):
+        line = _line(pts)
+        ys = _profile(line, grid)
+        if ys is None:
+            continue
+        for i in range(4, len(line), 9):
+            u, v = line[i]
+            for du, dv in ((2, 0), (0, 2), (-2, 0), (0, -2)):
+                c = (u + du, v + dv)
+                g = grid.get(c)
+                if g is None or abs(g - ys[i]) > 1:
+                    continue
+                s.fill((c[0], g + 1, c[1]), (c[0], g + 3, c[1]), "oak_fence")
+                s.block((c[0], g + 4, c[1]), "lantern")
+                break
+
+    n, t = NAVE, TOWER
+    for x in range(n["x1"] + 5, n["x2"] - 2, 4):
+        s.block((x, WALL_TOP - 2, (n["z1"] + n["z2"]) // 2), "lantern[hanging=true]")
+    for b, y in ((ALTAR_S, CHAPEL_TOP - 2), (ALTAR_N, CHAPEL_TOP - 2),
+                 (SACRIST, SACRIST_TOP - 2), (PORCH, PORCH_TOP - 1)):
+        s.block(((b["x1"] + b["x2"]) // 2, y, (b["z1"] + b["z2"]) // 2),
+                "lantern[hanging=true]")
+    s.block(((t["x1"] + t["x2"]) // 2, Y + 5, (t["z1"] + t["z2"]) // 2),
+            "lantern[hanging=true]")
+    for dz in (-1, 1):
+        s.block((PORCH["x1"] - 1, Y + 3, (PORCH["z1"] + PORCH["z2"]) // 2 + dz),
+                "lantern")
+    # Either side of the parish door, and on the garden tree.
+    du = (HOUSE["x1"] + HOUSE["x2"]) // 2
+    for dd in (-1, 1):
+        s.block((du + dd, HOUSE_Y + 3, HOUSE["z1"]), "lantern")
+
+
+def spawn(s, grid=None):
+    """Players arrive on the parish lawn, between house, washroom and workshop."""
+    grid = grid or survey()
+    su, sv = SPAWN
+    y = grid.get(SPAWN, HOUSE_Y - 1)
+    s.fill((su - 4, y, sv - 4), (su + 4, y, sv + 4), "grass_block")
+    s.fill((su - 4, y + 1, sv - 4), (su + 4, y + 5, sv + 4), "air")
+    s.fill((su - 1, y, sv - 1), (su + 1, y, sv + 1), PAVING)
+    s.raw(f"setworldspawn {ORIGIN[0] + su} {y + 1} {ORIGIN[1] + sv}")
+    s.raw("gamerule spawnRadius 3")
+
+
+# --- clearing the first attempt ----------------------------------------------
+
+OLD = dict(church=(-41, -1, -7, 23), pad=(-44, -4, -4, 28), spawn=(0, 0), y=89)
+
+
+def demolish(s, grid=None):
+    """Take down the church on the knoll and put the hilltop back to grass.
+
+    Written in world coordinates - it is the one thing here that is not part
+    of the village, so it gets its own session rather than the origin shift.
+    """
+    w = Session(origin=(0, 0))
+    ox1, oz1, ox2, oz2 = OLD["church"]
+    oy = OLD["y"]
+    ours = ("smooth_sandstone,andesite,polished_andesite,cobblestone,bricks,"
+            "brick_stairs,oxidized_copper,black_stained_glass_pane,iron_bars,"
+            "dirt_path,oak_fence,oak_planks,oak_slab,lantern,water,"
+            "cobblestone_slab,glass_pane")
+    # Everything of ours above the old churchyard level.
+    w.replace((ox1 - 8, oy, oz1 - 6), (ox2 + 8, oy + 40, oz2 + 6), ours, "air")
+    px1, pz1, px2, pz2 = OLD["pad"]
+    w.fill((px1, oy, pz1), (px2, oy, pz2), "grass_block")
+    w.fill((px1, oy + 1, pz1), (px2, oy + 12, pz2), "air")
+    # The lamp posts and the track ran down the old skirt, below that level.
+    w.replace((px1 - 30, oy - 22, pz1 - 12), (px2 + 14, oy + 2, pz2 + 6),
+              "oak_fence,lantern,cobblestone_slab", "air")
+    w.replace((px1 - 30, oy - 22, pz1 - 12), (px2 + 14, oy + 2, pz2 + 6),
+              "dirt_path,andesite,polished_andesite", "grass_block")
+    # And let the hilltop go back to being a hilltop.
+    w.sel((px1 + 2, oy, pz1 + 2), (px2 - 2, oy + 14, pz2 - 2))
+    w.raw("//forest oak 5")
+    w.flush(dry_run=getattr(s, "dry_run", False))
+
+
+STAGES = {"demolish": demolish, "terrain": terrain, "church": lambda s, g=None: church(s),
+          "graveyard": lambda s, g=None: graveyard(s), "fara": fara,
+          "orchard": orchard, "paths": paths, "lights": lights, "spawn": spawn}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("stages", nargs="*",
+                    default=[k for k in STAGES if k != "demolish"])
+    ap.add_argument("--dry-run", action="store_true")
+    a = ap.parse_args()
+    s = Session(origin=ORIGIN)
+    s.dry_run = a.dry_run
+    for name in a.stages:
+        if name not in STAGES:
+            sys.exit(f"unknown stage {name!r}; known: {', '.join(STAGES)}")
+        print(f"-- {name}")
+        # Each stage is flushed before the next is planned, and the ground is
+        # read again in between: the walk has to follow the churchyard that
+        # the terrain stage just cut, not the field that was there before.
+        STAGES[name](s, None if name == "church" else survey())
+        s.flush(dry_run=a.dry_run)
+
+
+if __name__ == "__main__":
+    main()
