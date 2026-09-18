@@ -350,3 +350,76 @@ def round_roof(s, u, v, y, r, block, step=1):
         y += step
         r -= 1
     return y
+
+
+def ring_cells(u, v, r):
+    """The cells of a circle, in order round it, so a caller can space
+    doorways or merlons evenly by counting along."""
+    import math
+    cells = set()
+    for dv in range(-r, r + 1):
+        w = int(round((r * r - dv * dv) ** 0.5))
+        cells.add((u - w, v + dv))
+        cells.add((u + w, v + dv))
+    for du in range(-r, r + 1):
+        w = int(round((r * r - du * du) ** 0.5))
+        cells.add((u + du, v - w))
+        cells.add((u + du, v + w))
+    return sorted(cells, key=lambda c: math.atan2(c[1] - v, c[0] - u))
+
+
+# --- hulls -------------------------------------------------------------------
+
+def hull(s, y, length, beam, depth, plank, trim=None, u0=0, v0=0):
+    """A boat hull: elliptical in plan, narrowing towards the keel.
+
+    Laid course by course from the keel up, each one clearing its own inside,
+    so what comes out is a shell with a hold in it rather than a solid block
+    of planks. Returns the deck level.
+    """
+    half = length // 2
+    for d in range(depth):
+        yy = y + d
+        narrow = depth - 1 - d
+        for i in range(-half, half + 1):
+            t = abs(i) / half
+            w = int(round(beam / 2 * (1 - t ** 2.5))) - narrow
+            if w < 0:
+                continue
+            s.fill((u0 + i, yy, v0 - w), (u0 + i, yy, v0 + w), plank)
+            if d and w > 1 and abs(i) < half - 1:
+                s.fill((u0 + i, yy, v0 - w + 1), (u0 + i, yy, v0 + w - 1), "air")
+    if trim:
+        yy = y + depth - 1
+        for i in range(-half, half + 1):
+            t = abs(i) / half
+            w = int(round(beam / 2 * (1 - t ** 2.5)))
+            if w >= 0:
+                s.block((u0 + i, yy, v0 - w), trim)
+                s.block((u0 + i, yy, v0 + w), trim)
+    return y + depth
+
+
+def deck(s, y, length, beam, block, u0=0, v0=0, rail=None, rail_h=2):
+    """Plank over a hull, and put a bulwark round the edge of it."""
+    half = length // 2
+    for i in range(-half, half + 1):
+        t = abs(i) / half
+        w = int(round(beam / 2 * (1 - t ** 2.5)))
+        if w < 0:
+            continue
+        s.fill((u0 + i, y, v0 - w), (u0 + i, y, v0 + w), block)
+        if rail and w > 0:
+            s.fill((u0 + i, y + 1, v0 - w), (u0 + i, y + rail_h, v0 - w), rail)
+            s.fill((u0 + i, y + 1, v0 + w), (u0 + i, y + rail_h, v0 + w), rail)
+
+
+def mast(s, u, v, y, height, log, yard_at=(), sail=None, beam=5):
+    """A mast with yards across it, and square sails hung under them."""
+    s.fill((u, y, v), (u, y + height, v), log)
+    for frac, drop in yard_at:
+        h = y + int(height * frac)
+        s.fill((u, h, v - beam), (u, h, v + beam), log)
+        if sail:
+            s.fill((u, h - drop, v - beam + 1), (u, h - 1, v + beam - 1), sail)
+    s.block((u, y + height + 1, v), "white_wool")

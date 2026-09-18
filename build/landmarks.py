@@ -20,9 +20,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools"))
 from mc import Session
-from parts import (BUILT, clear_growth, cylinder, disc, follow, gable,
-                   gable_end, level, line, perimeter, profile, round_roof,
-                   route, shell, trace, tree)
+from parts import (BUILT, clear_growth, cylinder, deck, disc, follow, gable,
+                   gable_end, hull, level, line, mast, perimeter, profile,
+                   ring_cells, round_roof, route, shell, trace, tree)
 from terrain_survey import ground_grid
 
 # Where each one stands, and what the map should call it. The coordinates come
@@ -40,7 +40,7 @@ SITES = {
                       note="aréna na pláni"),
     "hrad":      dict(at=(976, -192),   label="Hrad",
                       note="na nejvyšším vrcholu"),
-    "lod":       dict(at=(950, -1600),  label="Loď",
+    "lod":       dict(at=(990, -1626),  label="Loď",
                       note="u pobřeží"),
     "vzducholod": dict(at=(890, -250),  label="Létající loď",
                       note="nad horami"),
@@ -317,8 +317,286 @@ def carodejnice(s, grid):
     route(s, grid, [(0, b["z2"] + 1), (1, 9), (-2, 16)], "dirt_path", width=0)
 
 
+# --- 5. the arena -----------------------------------------------------------
+
+STONE = "sandstone"
+STONE_CUT = "cut_sandstone"
+STONE_SMOOTH = "smooth_sandstone"
+STONE_STAIR = "smooth_sandstone_stairs"
+
+
+def koloseum(s, grid):
+    """A ring of arches round a sanded floor, with the seating stepped up
+    between them. Four ways in, on the four winds."""
+    outer, inner = 24, 13
+    y = base_level(grid, (-outer, -outer, outer, outer))
+    clear_growth(s, (-outer, -outer, outer, outer), y, margin=4, up=30)
+    level(s, grid, (-outer - 1, -outer - 1, outer + 1, outer + 1), y, blend=6)
+
+    floor = y - 2                                   # the arena is sunk a little
+    # Clear the whole inside once rather than ring by ring: the same job in a
+    # few hundred commands instead of forty thousand.
+    for h in range(floor + 1, y + 15):
+        disc(s, 0, 0, h, outer - 2, "air")
+    disc(s, 0, 0, floor - 1, inner - 1, "stone_bricks")
+    disc(s, 0, 0, floor, inner - 1, "sand")
+
+    # Seating: each ring a course higher than the one inside it.
+    for i, r in enumerate(range(inner, outer - 1)):
+        h = y + i // 2
+        disc(s, 0, 0, h, r, STONE_SMOOTH, hollow=True)
+        disc(s, 0, 0, h - 1, r, STONE_CUT, hollow=True)
+    # The wall that holds the seating off the floor.
+    cylinder(s, 0, 0, floor, y + 1, inner, STONE_CUT)
+
+    # The outer wall, two storeys of arches under a cornice.
+    top = y + 13
+    cylinder(s, 0, 0, y - 3, top, outer, STONE)
+    cylinder(s, 0, 0, y - 3, top, outer - 1, STONE_SMOOTH)
+    for h in (y + 5, top):
+        disc(s, 0, 0, h, outer, STONE_CUT, hollow=True)
+    ring = ring_cells(0, 0, outer)
+    inner_ring = ring_cells(0, 0, outer - 1)
+    for level_y, height in ((y + 1, 4), (y + 7, 4)):
+        for cells in (ring, inner_ring):
+            for i, (u, v) in enumerate(cells):
+                if i % 6 in (1, 2, 3):
+                    s.fill((u, level_y, v), (u, level_y + height - 2, v), "air")
+                if i % 6 == 2:
+                    s.block((u, level_y + height - 1, v), "air")
+    # Merlons round the top.
+    for i, (u, v) in enumerate(ring):
+        if i % 3 == 0:
+            s.block((u, top + 1, v), STONE_CUT)
+
+    # Four tunnels in, and the stairs down to the sand.
+    for du, dv in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        for i in range(inner - 1, outer + 2):
+            for w in (-1, 0, 1):
+                u = du * i + (dv and w)
+                v = dv * i + (du and w)
+                s.fill((u, y - 2, v), (u, y + 2, v), "air")
+                s.block((u, y - 3, v), "stone_bricks")
+        for j in range(3):                      # steps down into the arena
+            u, v = du * (inner - 1 - j), dv * (inner - 1 - j)
+            s.fill((u - abs(dv), y - 1 - j, v - abs(du)),
+                   (u + abs(dv), y - 1 - j, v + abs(du)), "stone_brick_slab")
+    # Torches on the wall, and banners at the gates.
+    for i, (u, v) in enumerate(ring):
+        if i % 8 == 0:
+            s.block((u, y + 12, v), "lantern")
+    for du, dv in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        u, v = du * (outer - 1), dv * (outer - 1)
+        s.fill((u + (dv and 2), y + 3, v + (du and 2)),
+               (u + (dv and 2), y + 4, v + (du and 2)), "red_wool")
+    route(s, grid, [(0, outer + 2), (2, outer + 12), (0, outer + 24)],
+          "dirt_path", width=1)
+
+
+# --- 6. the castle ----------------------------------------------------------
+
+def hrad(s, grid):
+    """A keep and a curtain wall on the highest ground on the map, with the
+    rock left standing round it - it is a crag with a castle on it, not a
+    castle on a lawn."""
+    y = base_level(grid, (-13, -13, 13, 13))
+    clear_growth(s, (-16, -16, 16, 16), y, margin=3, up=34)
+    level(s, grid, (-14, -14, 14, 14), y, blend=8, top="stone")
+
+    stone, dark = "stone_bricks", "deepslate_bricks"
+    roof, roof_stair = "bricks", "brick_stairs"
+
+    # Curtain wall with a tower at each corner.
+    wall_top = y + 9
+    for u, v in perimeter((-13, -13, 13, 13)):
+        s.fill((u, y - 6, v), (u, wall_top, v), stone)
+        s.fill((u, y - 6, v), (u, y + 1, v), dark)
+    for i, (u, v) in enumerate(sorted(perimeter((-13, -13, 13, 13)))):
+        if i % 2 == 0:
+            s.block((u, wall_top + 1, v), stone)
+    s.fill((-12, y + 1, -12), (12, wall_top + 2, 12), "air")
+    s.fill((-12, y, -12), (12, y, 12), "stone_bricks")
+    for cu, cv in ((-13, -13), (-13, 13), (13, -13), (13, 13)):
+        cylinder(s, cu, cv, y - 6, wall_top + 4, 3, stone)
+        cylinder(s, cu, cv, y - 6, wall_top + 4, 2, "air", hollow=False)
+        for i, (u, v) in enumerate(ring_cells(cu, cv, 3)):
+            if i % 2 == 0:
+                s.block((u, wall_top + 5, v), stone)
+        s.fill((cu, wall_top + 4, cv), (cu, wall_top + 4, cv), "oak_fence")
+        round_roof(s, cu, cv, wall_top + 5, 3, roof)
+
+    # The gatehouse, facing the ramp up the hill.
+    s.fill((-1, y + 1, 13), (1, y + 4, 13), "air")
+    s.fill((-2, y + 1, 13), (-2, y + 6, 13), dark)
+    s.fill((2, y + 1, 13), (2, y + 6, 13), dark)
+    s.fill((-1, y + 5, 13), (1, y + 5, 13), "iron_bars")
+    s.fill((-1, y + 6, 13), (1, y + 6, 13), stone)
+
+    # The keep: a tall block with a pitched roof and a stair turret.
+    keep = dict(x1=-7, x2=3, z1=-7, z2=1)
+    shell(s, keep, y + 18, stone, y, floor_y=y + 1, plinth=dark,
+          floor="stone_bricks")
+    for h in (y + 7, y + 13):
+        s.fill((keep["x1"] + 1, h, keep["z1"] + 1),
+               (keep["x2"] - 1, h, keep["z2"] - 1), "dark_oak_planks")
+    for u in (keep["x1"], keep["x2"]):
+        for v in (keep["z1"], keep["z2"]):
+            s.fill((u, y, v), (u, y + 19, v), dark)
+    for h in (y + 4, y + 10, y + 16):
+        for u in range(keep["x1"] + 2, keep["x2"] - 1, 3):
+            s.fill((u, h, keep["z1"]), (u, h + 1, keep["z1"]), "glass_pane")
+            s.fill((u, h, keep["z2"]), (u, h + 1, keep["z2"]), "glass_pane")
+    gable_end(s, keep, y + 19, "x", stone)
+    gable(s, keep, y + 18, "x", roof, roof_stair)
+    s.fill((0, y + 1, keep["z2"]), (0, y + 3, keep["z2"]), "air")   # the door
+    # Stair turret on the keep's south-east corner.
+    cylinder(s, 4, 2, y, y + 24, 2, stone)
+    cylinder(s, 4, 2, y + 1, y + 24, 1, "air", hollow=False)
+    s.fill((4, y + 1, 1), (4, y + 24, 1), "ladder[facing=south]")
+    round_roof(s, 4, 2, y + 25, 2, roof)
+    s.fill((4, y + 28, 2), (4, y + 30, 2), "oak_fence")
+    s.block((4, y + 30, 3), "white_wool")
+
+    # A hall along the west wall, with a red roof of its own.
+    hall = dict(x1=-12, x2=-8, z1=-4, z2=6)
+    shell(s, hall, y + 6, stone, y, floor_y=y + 1, plinth=dark,
+          floor="dark_oak_planks")
+    gable_end(s, hall, y + 7, "z", stone)
+    gable(s, hall, y + 6, "z", roof, roof_stair)
+    for v in (-2, 1, 4):
+        s.fill((hall["x2"], y + 3, v), (hall["x2"], y + 4, v), "glass_pane")
+
+    # Lights, and the ramp climbing the crag to the gate.
+    for u, v in ((-6, 12), (6, 12), (-12, -10), (12, -10)):
+        s.fill((u, y + 1, v), (u, y + 3, v), "oak_fence")
+        s.block((u, y + 4, v), "lantern")
+    for i, (u, v) in enumerate(ring_cells(0, 0, 13)):
+        if i % 7 == 0:
+            s.block((u, wall_top, v), "lantern")
+    route(s, grid, [(0, 14), (1, 22), (6, 30), (4, 40)], "stone_bricks", width=1)
+
+
+# --- 7. the ship ------------------------------------------------------------
+
+SEA = 62                      # the water surface out there
+
+
+def lod(s, grid):
+    """A three-master lying at anchor off the beach, drawing four blocks."""
+    keel, length, beam = SEA - 4, 31, 11
+    deck_y = hull(s, keel, length, beam, 7, "spruce_planks", trim="dark_oak_log")
+    deck(s, deck_y, length, beam, "oak_planks", rail="spruce_fence", rail_h=2)
+    # Below decks, dry: the hull is a shell, so the hold stays out of the sea.
+    for h in range(keel + 1, deck_y):
+        s.fill((-12, h, -3), (12, h, 3), "air")
+    s.fill((-12, keel + 1, -3), (12, keel + 1, 3), "spruce_planks")
+    s.fill((-2, deck_y, 0), (-1, deck_y, 0), "air")          # the hatch
+    s.fill((-2, keel + 2, 0), (-2, deck_y - 1, 0), "ladder[facing=east]")
+
+    # Stern cabin, with the wheel in front of it.
+    cab = dict(x1=8, x2=13, z1=-3, z2=3)
+    shell(s, cab, deck_y + 4, "spruce_planks", deck_y, plinth="spruce_planks")
+    gable_end(s, cab, deck_y + 5, "x", "spruce_planks")
+    gable(s, cab, deck_y + 4, "x", "dark_oak_planks", "dark_oak_stairs")
+    s.fill((cab["x1"], deck_y + 1, 0), (cab["x1"], deck_y + 2, 0), "air")
+    for v in (-2, 2):
+        s.fill((cab["x2"], deck_y + 2, v), (cab["x2"], deck_y + 3, v), "glass_pane")
+    s.block((7, deck_y + 1, 0), "spruce_fence")
+    s.block((7, deck_y + 2, 0), "oak_trapdoor[facing=east,open=true]")
+    s.block((10, deck_y + 3, 0), "lantern[hanging=true]")
+
+    # Masts, yards and canvas.
+    mast(s, -9, 0, deck_y + 1, 17, "spruce_log[axis=y]",
+         yard_at=((0.95, 6), (0.6, 5)), sail="white_wool", beam=5)
+    mast(s, 0, 0, deck_y + 1, 20, "spruce_log[axis=y]",
+         yard_at=((0.95, 7), (0.6, 6)), sail="white_wool", beam=6)
+    mast(s, 6, 0, deck_y + 1, 14, "spruce_log[axis=y]",
+         yard_at=((0.9, 5),), sail="white_wool", beam=4)
+    # Bowsprit and rigging.
+    s.fill((-15, deck_y + 1, 0), (-19, deck_y + 3, 0), "spruce_fence")
+    for u, h in ((-9, 17), (0, 20), (6, 14)):
+        s.fill((u, deck_y + h, 0), (u, deck_y + h, 0), "spruce_fence")
+    for i in range(1, 9):
+        s.block((-9 - i, deck_y + 17 - 2 * i, 0), "iron_chain")
+        s.block((6 + i, deck_y + 14 - i, 0), "iron_chain")
+    # Lanterns fore and aft, and the anchor over the bow.
+    for u in (-13, 13):
+        s.block((u, deck_y + 3, 0), "lantern")
+    s.fill((-14, deck_y, 3), (-14, SEA - 3, 3), "iron_chain")
+    s.block((-14, SEA - 4, 3), "anvil")
+    # Cargo on deck.
+    s.fill((2, deck_y + 1, -2), (3, deck_y + 1, -1), "barrel")
+    s.block((3, deck_y + 1, 2), "chest[facing=south]")
+
+
+# --- 8. the flying ship ------------------------------------------------------
+
+def vzducholod(s, grid):
+    """A steam packet in the sky over the mountains: a hull, a house on its
+    back, chimneys trailing cloud, and wings that hold none of it up."""
+    y = 186
+    keel, length, beam = y, 35, 13
+    deck_y = hull(s, keel, length, beam, 8, "spruce_planks", trim="dark_oak_log")
+    deck(s, deck_y, length, beam, "oak_planks", rail="oak_fence", rail_h=1)
+
+    # The house amidships, two storeys of it, with a pitched roof.
+    big = dict(x1=-2, x2=8, z1=-4, z2=4)
+    shell(s, big, deck_y + 6, "white_terracotta", deck_y, plinth="spruce_planks")
+    for u in (big["x1"], big["x2"]):
+        for v in (big["z1"], big["z2"]):
+            s.fill((u, deck_y + 1, v), (u, deck_y + 6, v), "dark_oak_log[axis=y]")
+    for u in range(big["x1"] + 2, big["x2"] - 1, 3):
+        for v in (big["z1"], big["z2"]):
+            s.fill((u, deck_y + 2, v), (u, deck_y + 4, v), "glass_pane")
+    gable_end(s, big, deck_y + 7, "x", "white_terracotta")
+    gable(s, big, deck_y + 6, "x", "dark_oak_planks", "dark_oak_stairs")
+    small = dict(x1=-9, x2=-3, z1=-3, z2=3)
+    shell(s, small, deck_y + 4, "white_terracotta", deck_y, plinth="spruce_planks")
+    gable_end(s, small, deck_y + 5, "x", "white_terracotta")
+    gable(s, small, deck_y + 4, "x", "dark_oak_planks", "dark_oak_stairs")
+    s.fill((small["x2"], deck_y + 1, 0), (small["x2"], deck_y + 2, 0), "air")
+
+    # Chimneys, each trailing a plume of cloud downwind.
+    for u, v, h in ((2, -2, 12), (5, 2, 14), (9, 0, 10)):
+        s.fill((u, deck_y + 1, v), (u, deck_y + h, v), "copper_block")
+        s.block((u, deck_y + h + 1, v), "waxed_copper_block")
+        for i in range(1, 9):
+            s.fill((u - i, deck_y + h + 1 + i, v - i // 3),
+                   (u - i + 1, deck_y + h + 2 + i, v + i // 3), "white_wool")
+
+    # Wings and paddle wheels along the flanks, and a rudder at the stern.
+    for side in (-1, 1):
+        v = side * (beam // 2)
+        for i, u in enumerate(range(-14, 12, 2)):
+            s.fill((u, deck_y - 2, v), (u, deck_y - 2, v + side * 4), "white_wool")
+            s.fill((u, deck_y - 3, v + side * 4), (u, deck_y - 2, v + side * 6),
+                   "spruce_planks")
+        for cu in (-8, 4):
+            for i, (a, b) in enumerate(ring_cells(0, 0, 4)):
+                s.block((cu + a, deck_y - 1 + b, v + side), "stripped_dark_oak_wood")
+            s.fill((cu, deck_y - 1, v + side), (cu, deck_y - 1, v + side * 2),
+                   "dark_oak_log")
+    s.fill((16, deck_y - 2, 0), (20, deck_y + 2, 0), "spruce_planks")
+    s.fill((17, deck_y - 4, -3), (19, deck_y - 4, 3), "spruce_planks")
+    s.fill((-18, deck_y - 1, 0), (-21, deck_y + 1, 0), "spruce_planks")
+    s.fill((-20, deck_y + 2, -2), (-20, deck_y + 2, 2), "white_wool")
+
+    # Lights, and a flag at the bow.
+    for u, v in ((-6, -5), (-6, 5), (10, -5), (10, 5), (0, 0)):
+        s.block((u, deck_y + 1, v), "lantern")
+    for i in (1, 2):
+        s.block((-16, deck_y + i, 0), "spruce_fence")
+    s.fill((-16, deck_y + 3, 0), (-16, deck_y + 5, 0), "spruce_fence")
+    s.fill((-15, deck_y + 4, 0), (-13, deck_y + 5, 0), "red_wool")
+    # Lanterns hung under the hull, as the picture has them.
+    for u in (-10, -4, 6):
+        s.fill((u, keel - 1, 0), (u, keel - 3, 0), "iron_chain")
+        s.block((u, keel - 4, 0), "lantern[hanging=true]")
+
+
 BUILDS = {"mlyn": mlyn, "chata": chata, "strom": strom,
-          "carodejnice": carodejnice}
+          "carodejnice": carodejnice, "koloseum": koloseum, "hrad": hrad,
+          "lod": lod, "vzducholod": vzducholod}
 
 
 def main():
