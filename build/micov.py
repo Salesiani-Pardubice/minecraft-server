@@ -546,7 +546,7 @@ def washroom(s):
     s.block((b["x1"], WASH_Y + 2, mv), "oak_door[facing=west,half=upper]")
     # Fittings.
     for v in range(b["z1"] + 2, b["z2"] - 1, 2):
-        s.block((b["x2"] - 1, WASH_Y + 1, v), "cauldron[level=3]")
+        s.block((b["x2"] - 1, WASH_Y + 1, v), "water_cauldron[level=3]")
     s.block((b["x1"] + 2, WASH_Y + 3, mv), "lantern[hanging=true]")
 
 
