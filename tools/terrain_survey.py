@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """Read terrain heights straight out of the world's region files.
 
-Probing the live server for heights would mean thousands of RCON round trips;
-the region files already hold a WORLD_SURFACE heightmap per chunk, so this
-reads them directly. The server keeps recently-changed chunks in memory, so run
-`save-all flush` first if you need the very latest state.
+Probing the live server for heights would mean thousands of RCON round trips,
+so this reads the saved chunks directly. The server keeps recently-changed
+chunks in memory, so run `save-all flush` first if you need the latest state.
+
+The stored heightmaps are no use for *ground* level: all four of them count
+leaves and logs, so a column under an oak reads as the top of the tree - which
+is how the first terracing pass came to tip dirt into the canopy. Fully
+generated chunks no longer keep the OCEAN_FLOOR_WG map that would have
+answered it. So `ground_grid` walks the block data itself, top down, and stops
+at the first block that is not air, foliage, water or something we built.
 
 Usage:  terrain_survey.py [--centre X Z] [--radius N] [--footprint W D]
 """
@@ -92,8 +98,8 @@ def unpack_heightmap(longs):
     return out
 
 
-def read_region(rx, rz):
-    """Yield (chunk_x, chunk_z, heights[256]) for every chunk present."""
+def read_chunks(rx, rz):
+    """Yield (chunk_x, chunk_z, nbt) for every chunk stored in one region."""
     path = REGION_DIR / f"r.{rx}.{rz}.mca"
     if not path.exists():
         return
@@ -112,12 +118,108 @@ def read_region(rx, rz):
             nbt = NBT(data).parse()
         except Exception:
             continue
+        yield rx * 32 + (idx % 32), rz * 32 + (idx // 32), nbt
+
+
+def read_region(rx, rz):
+    """Yield (chunk_x, chunk_z, heights[256]) from the WORLD_SURFACE map.
+
+    Tree tops included - see the module docstring. Kept for the flattest and
+    prominence searches, which only compare sites with each other.
+    """
+    for cx, cz, nbt in read_chunks(rx, rz):
         hm = (nbt.get("Heightmaps") or {}).get("WORLD_SURFACE")
-        if not hm:
+        if hm:
+            yield cx, cz, unpack_heightmap(hm)
+
+
+# --- ground level from the block data ---------------------------------------
+
+# Anything that grows on the ground, floats over it, or was put there by us:
+# skipped when looking down a column for the surface.
+SKIP_EXACT = {
+    "air", "cave_air", "void_air", "water", "bubble_column", "snow", "ice",
+    "cobweb", "vine", "glow_lichen", "lily_pad", "sugar_cane", "bamboo",
+    "cactus", "pumpkin", "melon", "dead_bush", "fern", "large_fern",
+    "short_grass", "grass", "tall_grass", "seagrass", "tall_seagrass",
+    "kelp", "kelp_plant", "moss_carpet", "hanging_roots", "azalea",
+    "flowering_azalea", "torch", "wall_torch", "lantern", "chain",
+    "dandelion", "poppy", "blue_orchid", "allium", "azure_bluet",
+    "oxeye_daisy", "cornflower", "lily_of_the_valley", "wither_rose",
+    "sunflower", "lilac", "rose_bush", "peony", "torchflower",
+    "spore_blossom", "pink_petals", "sweet_berry_bush",
+}
+SKIP_SUFFIX = ("_leaves", "_log", "_wood", "_sapling", "_tulip", "_mushroom",
+               "_fungus", "_roots", "_sprouts", "_fence", "_fence_gate",
+               "_sign", "_banner", "_carpet", "_button", "_pressure_plate")
+
+
+def is_cover(name):
+    """True for blocks that sit on the ground rather than being the ground."""
+    return name in SKIP_EXACT or name.endswith(SKIP_SUFFIX)
+
+
+def section_lookup(section):
+    """(palette, index_of) for one 16^3 section, or None if it is all cover."""
+    bs = section.get("block_states") or {}
+    palette = [str(e.get("Name", "")).split(":")[-1] for e in bs.get("palette", [])]
+    if not palette or all(is_cover(n) for n in palette):
+        return None
+    data = bs.get("data")
+    if data is None:                       # single-block section
+        return palette, lambda i: 0
+    # 1.16+: entries are packed into longs without ever spanning one.
+    bits = max(4, (len(palette) - 1).bit_length())
+    per, mask = 64 // bits, (1 << bits) - 1
+
+    def index_of(i):
+        return (data[i // per] >> ((i % per) * bits)) & mask
+
+    return palette, index_of
+
+
+def chunk_ground(nbt):
+    """Ground height for all 256 columns of a chunk, or None where unknown."""
+    cols = [None] * 256
+    left = 256
+    for sec in sorted(nbt.get("sections") or [], key=lambda s: -s.get("Y", 0)):
+        look = section_lookup(sec)
+        if look is None:
             continue
-        cx = rx * 32 + (idx % 32)
-        cz = rz * 32 + (idx // 32)
-        yield cx, cz, unpack_heightmap(hm)
+        palette, index_of = look
+        base = sec["Y"] * 16
+        for y in range(15, -1, -1):
+            row = y * 256
+            for c in range(256):
+                if cols[c] is not None:
+                    continue
+                if not is_cover(palette[index_of(row + c)]):
+                    cols[c] = base + y
+                    left -= 1
+        if left == 0:
+            break
+    return cols
+
+
+def ground_grid(centre, radius):
+    """Map every (x, z) in range to the top of the actual ground."""
+    cx0, cz0 = centre
+    grid = {}
+    regions = {(x // 512, z // 512)
+               for x in (cx0 - radius, cx0 + radius)
+               for z in (cz0 - radius, cz0 + radius)}
+    for rx, rz in regions:
+        for cx, cz, nbt in read_chunks(rx, rz):
+            if (abs(cx * 16 + 8 - cx0) > radius + 16
+                    or abs(cz * 16 + 8 - cz0) > radius + 16):
+                continue
+            for i, h in enumerate(chunk_ground(nbt)):
+                if h is None:
+                    continue
+                x, z = cx * 16 + (i % 16), cz * 16 + (i // 16)
+                if abs(x - cx0) <= radius and abs(z - cz0) <= radius:
+                    grid[(x, z)] = h
+    return grid
 
 
 def build_grid(centre, radius):

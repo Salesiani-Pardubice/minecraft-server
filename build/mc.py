@@ -18,8 +18,12 @@ class Session:
 
     BATCH = 400
 
-    def __init__(self, world="world", container="minecraft-server", echo=False):
+    def __init__(self, world="world", container="minecraft-server", echo=False,
+                 origin=(0, 0)):
         self.world, self.container, self.echo = world, container, echo
+        # Everything above this layer is built in village-local coordinates and
+        # shifted here, so moving the village means changing one constant.
+        self.ox, self.oz = origin
         self.q = [f"//world {world}"]
 
     # --- primitives ---------------------------------------------------------
@@ -28,8 +32,8 @@ class Session:
         self.q.append(cmd)
 
     def sel(self, a, b):
-        self.q.append("//pos1 %d,%d,%d" % a)
-        self.q.append("//pos2 %d,%d,%d" % b)
+        self.q.append("//pos1 %d,%d,%d" % (a[0] + self.ox, a[1], a[2] + self.oz))
+        self.q.append("//pos2 %d,%d,%d" % (b[0] + self.ox, b[1], b[2] + self.oz))
 
     def fill(self, a, b, block):
         self.sel(a, b)
