@@ -25,8 +25,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools"))
 from mc import Session
-from parts import (clear_growth, cone, follow, gable, gable_end, level, line,
-                   perimeter, profile, route, shell, trace, tree)
+from parts import (BUILT as parts_BUILT, clear_growth, cone, follow, gable,
+                   gable_end, level, line, perimeter, profile, route, shell,
+                   trace, tree)
 from terrain_survey import ground_grid
 
 # --- where the village sits --------------------------------------------------
@@ -130,27 +131,13 @@ ORCHARD = (0, -60, 40, -40)                     # ovocná zahrada, u1 v1 u2 v2
 FIRE = (16, -50)
 
 
-# What we put up ourselves. The survey has to look past it: a wall is built
-# on the ground, and next time it is read as the ground, so every rebuild
-# would raise it another course - which is how the parish wall reached five
-# and the wayside cross ended up hanging twenty blocks in the air.
-PAVED = frozenset(("dirt_path", "gravel", "coarse_dirt"))
-# Andesite is deliberately absent: it is our paving, but it also occurs in
-# natural bands underground, and treating it as masonry made the survey fall
-# through one - reporting ground twelve blocks down, where the clearing pass
-# then dug a pit. Paving is ground anyway; only what stands on the ground
-# belongs here.
-BUILT = frozenset((
-    "smooth_sandstone", "polished_andesite", "cobblestone",
-    "cobblestone_wall", "cobblestone_slab", "bricks", "brick_stairs",
-    "stone_bricks", "stone_brick_wall", "mossy_cobblestone", "smooth_stone",
-    "smooth_quartz", "deepslate_tiles", "deepslate_tile_stairs",
-    "deepslate_tile_slab", "spruce_planks", "spruce_stairs", "spruce_slab",
-    "oak_planks", "oak_slab", "oak_stairs", "iron_bars", "glass", "glass_pane",
-    "black_stained_glass_pane", "oxidized_copper", "campfire", "water_cauldron",
-    "crafting_table", "smithing_table", "furnace", "blast_furnace", "chest",
-    "barrel", "anvil", "oak_door", "spruce_door", "polished_deepslate",
+# The village palette adds its own pieces to the shared list; see parts.BUILT
+# for why paving and andesite are deliberately left out of it.
+BUILT = parts_BUILT | frozenset((
+    "black_stained_glass_pane", "deepslate_tiles", "deepslate_tile_stairs",
+    "deepslate_tile_slab", "smooth_quartz", "water_cauldron",
 ))
+PAVED = frozenset(("dirt_path", "gravel", "coarse_dirt"))
 
 
 def survey(radius=95, bare=True):

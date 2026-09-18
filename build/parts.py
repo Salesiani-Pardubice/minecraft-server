@@ -13,6 +13,30 @@ village church and a windmill.
 DOWN_N, DOWN_S = "south", "north"
 DOWN_W, DOWN_E = "east", "west"
 
+# What a build puts up itself. The ground survey has to look past it: a wall
+# is built on the ground and is then read as the ground, so every rebuild
+# would raise it another course. Paving is deliberately absent - it *is* the
+# ground - and so is andesite, which also occurs in natural bands underground.
+BUILT = frozenset((
+    "smooth_sandstone", "polished_andesite", "cobblestone", "cobblestone_wall",
+    "cobblestone_slab", "mossy_cobblestone", "mossy_stone_bricks", "bricks",
+    "brick_stairs", "stone_bricks", "stone_brick_wall", "stone_brick_stairs",
+    "stone_brick_slab", "chiseled_stone_bricks", "smooth_stone", "quartz_block",
+    "smooth_quartz", "deepslate_tiles", "deepslate_tile_stairs",
+    "deepslate_tile_slab", "polished_deepslate", "polished_deepslate_stairs",
+    "spruce_planks", "spruce_stairs", "spruce_slab", "spruce_fence",
+    "oak_planks", "oak_slab", "oak_stairs", "oak_fence", "dark_oak_planks",
+    "dark_oak_stairs", "dark_oak_slab", "jungle_planks", "jungle_stairs",
+    "jungle_slab", "stripped_oak_wood", "stripped_spruce_wood",
+    "stripped_dark_oak_wood", "stripped_jungle_wood", "iron_bars", "glass",
+    "glass_pane", "white_stained_glass", "black_stained_glass_pane",
+    "oxidized_copper", "copper_block", "white_wool", "light_gray_wool",
+    "campfire", "water_cauldron", "cauldron", "crafting_table",
+    "smithing_table", "furnace", "blast_furnace", "chest", "barrel", "anvil",
+    "brewing_stand", "oak_door", "spruce_door", "jungle_door", "dark_oak_door",
+    "bookshelf", "lectern", "ladder", "scaffolding", "hay_block",
+))
+
 # One mask per command: WorldEdit reads "##logs,##leaves" as a single tag
 # named "logs,##leaves" and rejects the lot.
 GROWTH = ("##logs", "##leaves", "##saplings", "##flowers", "vine",
@@ -294,3 +318,35 @@ def route(s, grid, points, surface="dirt_path", width=1, bed="dirt"):
                     s.fill((c[0], y + 1, c[1]), (c[0], g + 3, c[1]), "air")
                 s.block((c[0], y, c[1]), surface)
                 s.fill((c[0], y + 1, c[1]), (c[0], y + 3, c[1]), "air")
+
+
+# --- round work --------------------------------------------------------------
+
+def disc(s, u, v, y, r, block, hollow=False):
+    """A filled or hollow circle of blocks, laid a row at a time."""
+    for dv in range(-r, r + 1):
+        w = int(round((r * r - dv * dv) ** 0.5))
+        if not hollow:
+            s.fill((u - w, y, v + dv), (u + w, y, v + dv), block)
+            continue
+        inner = r - 1
+        wi = int(round((inner * inner - dv * dv) ** 0.5)) if abs(dv) <= inner else -1
+        if wi < 0:
+            s.fill((u - w, y, v + dv), (u + w, y, v + dv), block)
+        else:
+            s.fill((u - w, y, v + dv), (u - wi - 1, y, v + dv), block)
+            s.fill((u + wi + 1, y, v + dv), (u + w, y, v + dv), block)
+
+
+def cylinder(s, u, v, y1, y2, r, block, hollow=True):
+    for y in range(y1, y2 + 1):
+        disc(s, u, v, y, r, block, hollow=hollow)
+
+
+def round_roof(s, u, v, y, r, block, step=1):
+    """A cone over a round tower."""
+    while r >= 0:
+        disc(s, u, v, y, r, block, hollow=(r > 1))
+        y += step
+        r -= 1
+    return y
