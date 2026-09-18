@@ -98,9 +98,16 @@ class Session:
             ).stdout
             for line in out.splitlines():
                 low = line.lower()
+                # A rejected command does not always say "error": a bad mask
+                # comes back as "Too many arguments." and a usage line, which
+                # is how a clearing pass once reported success and felled
+                # nothing.
                 if any(w in low for w in ("unknown", "error", "invalid",
                                           "not loaded", "exception",
-                                          "you need", "please")):
+                                          "you need", "please", "usage:",
+                                          "too many", "too few", "expected",
+                                          "not recognized", "no block",
+                                          "cannot", "failed", "denied")):
                     problems.append(line.strip())
             if self.echo:
                 print(f"  sent {len(batch)} commands")

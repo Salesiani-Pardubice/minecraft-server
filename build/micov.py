@@ -206,6 +206,29 @@ def level(s, grid, box, y, top="grass_block", blend=0, cells=None):
             _column(s, v, *run)
 
 
+FORCE = False
+# One mask per command: WorldEdit reads "##logs,##leaves" as a single tag
+# named "logs,##leaves" and rejects the lot, which is how the first clearing
+# pass reported success and felled nothing.
+GROWTH = ("##logs", "##leaves", "##saplings", "##flowers", "vine",
+          "dead_bush", "sweet_berry_bush", "moss_carpet")
+
+
+def clear_growth(s, box, y, margin=3, up=26, down=4):
+    """Fell whatever is growing over a site before anything is built on it.
+
+    The ground survey looks past foliage on purpose, so a levelled pad can
+    come out with a full-grown oak standing in the middle of it and the
+    building disappears into the wood. Clearing first is the only way the
+    pads read as a site.
+    """
+    u1, v1, u2, v2 = box
+    s.sel((u1 - margin, y - down, v1 - margin),
+          (u2 + margin, y + up, v2 + margin))
+    for mask in GROWTH:
+        s.raw(f"//replace {mask} air")
+
+
 def terrain(s, grid=None):
     """Level the churchyard, and a pad under each building of the parish.
 
@@ -215,11 +238,16 @@ def terrain(s, grid=None):
     which is exactly what happened the first time it was run out of order.
     """
     grid = grid or survey()
-    standing = grid.get((NAVE["x1"] + 2, NAVE["z1"]))
-    if standing is not None and standing > Y + 3:
-        sys.exit("terrain: the church is standing at this site - levelling "
-                 "would cut it down. Run terrain before church.")
+    for what, cell, floor in (("church", (NAVE["x1"] + 2, NAVE["z1"]), Y),
+                              ("parish house", (HOUSE["x1"] + 2, HOUSE["z1"]),
+                               HOUSE_Y),
+                              ("workshop", (SHOP["x1"] + 2, SHOP["z1"]), SHOP_Y)):
+        standing = grid.get(cell)
+        if standing is not None and standing > floor + 3 and not FORCE:
+            sys.exit(f"terrain: the {what} is standing at this site - "
+                     "levelling would cut it down. Run terrain first.")
     keep = yard_cells()
+    clear_growth(s, YARD, Y)
     level(s, grid, YARD, Y, cells=keep)
 
     # The chamfered corner has to be taken back down to the ground that runs
@@ -246,6 +274,7 @@ def terrain(s, grid=None):
     for box, y in ((HOUSE, HOUSE_Y), (WING, HOUSE_Y), (WASH, WASH_Y),
                    (PERGOLA, WASH_Y), (SHOP, SHOP_Y)):
         pad = (box["x1"] - 1, box["z1"] - 1, box["x2"] + 1, box["z2"] + 1)
+        clear_growth(s, pad, y, margin=4)
         level(s, grid, pad, y - 1, blend=3)
 
 
@@ -879,7 +908,11 @@ def main():
     ap.add_argument("stages", nargs="*",
                     default=[k for k in STAGES if k != "demolish"])
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--force", action="store_true",
+                    help="level even where something is standing, taking it down")
     a = ap.parse_args()
+    global FORCE
+    FORCE = a.force
     s = Session(origin=ORIGIN)
     s.dry_run = a.dry_run
     for name in a.stages:
