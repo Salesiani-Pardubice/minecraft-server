@@ -955,6 +955,16 @@ def planned():
     return ok
 
 
+def near_plan(reach=6):
+    """Cells within reach of something the plan puts down."""
+    out = set()
+    for u, v in planned():
+        for du in range(-reach, reach + 1):
+            for dv in range(-reach, reach + 1):
+                out.add((u + du, v + dv))
+    return out
+
+
 def fill_holes(s, grid, rounds=8):
     """Fill in pits we dug, working in from their rims.
 
@@ -968,7 +978,9 @@ def fill_holes(s, grid, rounds=8):
         for u in range(b["x1"] - 1, b["x2"] + 2):
             for v in range(b["z1"] - 1, b["z2"] + 2):
                 keep_out.add((u, v))
-    work = dict(grid)
+    # Only near our own work: a gully at the edge of the survey is landscape,
+    # not damage, and filling it in is vandalism rather than repair.
+    work = {c: h for c, h in grid.items() if c in near_plan()}
     filled = 0
     for _ in range(rounds):
         todo = []
