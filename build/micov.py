@@ -76,7 +76,26 @@ SPIRE_TOP   = TOWER_TOP + 6
 
 # --- the ground plan ---------------------------------------------------------
 YARD = (-22, -18, 20, 16)   # churchyard platform: u1, v1, u2, v2
+CHAMFER = 28                # its north-east corner is cut back off the lane
 GATE_E, GATE_W = (20, -4), (-22, -2)        # the two ways into the graveyard
+
+
+def yard_cells():
+    """The churchyard, with the corner the lane runs past cut off it.
+
+    The map draws that edge as a diagonal, and it has to be one: left square,
+    the corner of the platform stands in the middle of the lane.
+    """
+    u1, v1, u2, v2 = YARD
+    return {(u, v) for u in range(u1, u2 + 1) for v in range(v1, v2 + 1)
+            if u - v <= CHAMFER}
+
+
+def edge_of(cells):
+    """Cells of a region that have a side facing out of it."""
+    return {(u, v) for u, v in cells
+            if not all((u + du, v + dv) in cells
+                       for du, dv in ((1, 0), (-1, 0), (0, 1), (0, -1)))}
 
 # The lane, running north-west to south-east past the churchyard, with the
 # graveyard on one side of it and the parish plot on the other.
@@ -147,7 +166,7 @@ def _column(s, v, key, ua, ub):
     s.fill((ua, tgt, v), (ub, tgt, v), top)
 
 
-def level(s, grid, box, y, top="grass_block", blend=0):
+def level(s, grid, box, y, top="grass_block", blend=0, cells=None):
     """Flatten a footprint to y, easing out over `blend` blocks if asked.
 
     Runs of equal (target, natural) are filled in one command; a 43 by 35
@@ -159,6 +178,8 @@ def level(s, grid, box, y, top="grass_block", blend=0):
         for u in range(u1 - blend, u2 + blend + 1):
             nat = grid.get((u, v))
             d = max(max(u1 - u, 0, u - u2), max(v1 - v, 0, v - v2))
+            if cells is not None and d == 0 and (u, v) not in cells:
+                nat = None
             if nat is None:
                 tgt = None
             elif d == 0:
@@ -188,7 +209,30 @@ def level(s, grid, box, y, top="grass_block", blend=0):
 def terrain(s, grid=None):
     """Level the churchyard, and a pad under each building of the parish."""
     grid = grid or survey()
-    level(s, grid, YARD, Y)
+    keep = yard_cells()
+    level(s, grid, YARD, Y, cells=keep)
+
+    # The chamfered corner has to be taken back down to the ground that runs
+    # on outside the yard - on a rebuild it is still standing at platform
+    # level from before the lane showed the clash.
+    u1, v1, u2, v2 = YARD
+    for v in range(v1, v2 + 1):
+        for u in range(u1, u2 + 1):
+            if (u, v) in keep:
+                continue
+            out = [grid.get((u + d, v)) for d in range(1, 8)] + \
+                  [grid.get((u, v - d)) for d in range(1, 8)]
+            out = [h for h in out if h is not None]
+            here = grid.get((u, v))
+            if not out or here is None:
+                continue
+            tgt = min(out)
+            if tgt < here:
+                s.fill((u, tgt + 1, v), (u, here + 12, v), "air")
+            elif tgt > here:
+                s.fill((u, here, v), (u, tgt - 1, v), "dirt")
+            s.block((u, tgt, v), "grass_block")
+
     for box, y in ((HOUSE, HOUSE_Y), (WING, HOUSE_Y), (WASH, WASH_Y),
                    (PERGOLA, WASH_Y), (SHOP, SHOP_Y)):
         pad = (box["x1"] - 1, box["z1"] - 1, box["x2"] + 1, box["z2"] + 1)
@@ -375,18 +419,19 @@ def _cross(s, u, v, y, stem="cobblestone_wall", high=4):
 def graveyard(s):
     """The retaining wall, the railing round it, the rows, and the trees."""
     u1, v1, u2, v2 = YARD
+    cells = yard_cells()
+    edge = edge_of(cells)
 
     # The platform is held by its own edge rather than by a bank of dirt: a
     # face of cobblestone, buried where the ground outside is already higher.
-    for a, b in (((u1, v1), (u2, v1)), ((u1, v2), (u2, v2)),
-                 ((u1, v1), (u1, v2)), ((u2, v1), (u2, v2))):
-        s.fill((a[0], Y - 9, a[1]), (b[0], Y - 1, b[1]), PLINTH)
+    for u, v in sorted(edge):
+        s.fill((u, Y - 9, v), (u, Y - 1, v), PLINTH)
 
     # Railing on top, in the grey the map draws round the graveyard: stone
     # posts every four blocks with iron between them, open at the two gates.
     gates = {(g[0] + du, g[1] + dv) for g in (GATE_E, GATE_W)
              for du in (-1, 0, 1) for dv in (-1, 0, 1)}
-    for u, v in sorted(_perimeter(YARD)):
+    for u, v in sorted(edge):
         if (u, v) in gates:
             continue
         post = (u - u1) % 4 == 0 and (v - v1) % 4 == 0
@@ -405,7 +450,7 @@ def graveyard(s):
     for u in range(u1 + 2, u2 - 2, 3):
         for v in range(v1 + 2, v2 - 3, 4):
             plot = [(u + du, v + dv) for du in (0, 1) for dv in (0, 1, 2)]
-            if any(c in keep_clear for c in plot):
+            if any(c in keep_clear or c not in cells for c in plot):
                 continue
             if not all(u1 + 2 <= c[0] <= u2 - 2 and v1 + 2 <= c[1] <= v2 - 2
                        for c in plot):
