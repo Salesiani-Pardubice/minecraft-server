@@ -729,8 +729,12 @@ def fill_holes(s, grid, rounds=8):
             for v in range(b["z1"] - 1, b["z2"] + 2):
                 keep_out.add((u, v))
     # Only near our own work: a gully at the edge of the survey is landscape,
-    # not damage, and filling it in is vandalism rather than repair.
-    work = {c: h for c, h in grid.items() if c in near_plan()}
+    # not damage, and filling it in is vandalism rather than repair. The set
+    # is built once - inside the comprehension it was rebuilt for every one
+    # of the thirty-six thousand columns, which took the stage from seconds
+    # to an hour.
+    near = near_plan()
+    work = {c: h for c, h in grid.items() if c in near}
     filled = 0
     for _ in range(rounds):
         todo = []
