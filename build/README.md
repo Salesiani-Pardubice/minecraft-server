@@ -89,8 +89,57 @@ cells = m.trace(m.WALK, width=1)
 neklade, a zasype jámy vyhloubené dřívějším omylem. Po každé změně geometrie
 je dobré ho pustit.
 
+## Stavby po mapě
+
+`build/landmarks.py` staví osm samostatných staveb roztroušených po světě.
+Místa nejsou vybraná od oka: skript prošel všech 8 456 vygenerovaných chunků
+a hledal podle biomu, střední výšky a převýšení nad okolím.
+
+```bash
+python3 build/landmarks.py                 # všechny
+python3 build/landmarks.py hrad koloseum   # vybrané
+python3 build/landmarks.py --markers       # přepíše seznam značek pro mapu
+```
+
+| stavba | kde | proč tam |
+|---|---|---|
+| Hrad | 976, −192 | nejvyšší terén na mapě (y ≈ 137) |
+| Létající loď | 890, −250 | ve vzduchu na y 186 nad horami |
+| Chata v pralese | 768, −1536 | džungle u pobřeží |
+| Dům na stromě | −320, −256 | starý les; strom je postavený, žádný tam není dost silný |
+| Čarodějnická chalupa | 136, −328 | temný les, nejnižší sloupec nad hladinou |
+| Koloseum | 690, 75 | souvislá pláň |
+| Loď | 990, −1626 | 12 bloků hloubky, 8 bloků od břehu |
+| Větrný mlýn | 480, 144 | kopec v louce, převyšuje okolí o 33 bloků |
+
+Společné díly (terén, střechy, cesty, trupy, stromy) jsou v `build/parts.py`;
+oba stavební skripty je sdílejí.
+
+### Značky v mapě
+
+squaremap si svůj `markers.json` průběžně přepisuje, takže se do něj nepíše.
+Seznam staveb vygeneruje `landmarks.py --markers` do `admin-api/landmarks.json`,
+ten je zakompilovaný v binárce admin-api a ta ho **přimíchá do odpovědi**
+na `/mapa/tiles/{svět}/markers.json`. Ikonu servíruje taky admin-api, na cestě,
+kterou si frontend složí z klíče `squaremap-landmark`.
+
+Po změně souřadnic tedy: `--markers`, `docker compose build admin-api`,
+`docker compose up -d admin-api`.
+
+### Prohlížení bez hry
+
+```bash
+python3 tools/look.py --centre 976 -192 --radius 17 --section -192
+```
+
+Vypíše půdorys (nejvyšší blok každého sloupce) a svislý řez. Rychlejší než
+tam doběhnout.
+
 ## Co zbývá
 
 - Staré místo na kopci (world ≈ −44..−4, 89) je po demolici rovná travnatá
   plošina; zaslouží si zvlnit, aby zase vypadalo jako kopec.
 - Hřbitovní lípy sází `//forest`, takže každý běh `graveyard` přidá další.
+- Pozor na `pathlib.write_text()` v jednorázových patch skriptech: soubor
+  otevře a teprve pak selže na kódování, takže po pádu zůstane prázdný.
+  Vždycky `encoding="utf-8"` (nebo `PYTHONUTF8=1`).

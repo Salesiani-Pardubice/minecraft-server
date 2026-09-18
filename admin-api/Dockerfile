@@ -4,6 +4,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY *.go ./
 COPY web ./web
+# Embedded by mapmarkers.go: the landmarks the map marks.
+COPY landmarks.json ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/admin-api .
 
 FROM alpine:3.23.5

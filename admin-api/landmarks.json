@@ -1,0 +1,65 @@
+[
+  {
+    "name": "mlyn",
+    "x": 480,
+    "z": 144,
+    "label": "Větrný mlýn",
+    "note": "na kopci v květnaté louce"
+  },
+  {
+    "name": "chata",
+    "x": 768,
+    "z": -1536,
+    "label": "Chata v pralese",
+    "note": "v džungli u pobřeží"
+  },
+  {
+    "name": "strom",
+    "x": -320,
+    "z": -256,
+    "label": "Dům na stromě",
+    "note": "v pralesním dubu"
+  },
+  {
+    "name": "carodejnice",
+    "x": 136,
+    "z": -328,
+    "label": "Čarodějnická chalupa",
+    "note": "v temném lese"
+  },
+  {
+    "name": "koloseum",
+    "x": 690,
+    "z": 75,
+    "label": "Koloseum",
+    "note": "aréna na pláni"
+  },
+  {
+    "name": "hrad",
+    "x": 976,
+    "z": -192,
+    "label": "Hrad",
+    "note": "na nejvyšším vrcholu"
+  },
+  {
+    "name": "lod",
+    "x": 990,
+    "z": -1626,
+    "label": "Loď",
+    "note": "u pobřeží"
+  },
+  {
+    "name": "vzducholod",
+    "x": 890,
+    "z": -250,
+    "label": "Létající loď",
+    "note": "nad horami"
+  },
+  {
+    "name": "micov",
+    "x": 50,
+    "z": -63,
+    "label": "Míčov",
+    "note": "kostel sv. Matouše, hřbitov a fara"
+  }
+]

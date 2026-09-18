@@ -49,6 +49,11 @@ func main() {
 
 	// Public.
 	mux.HandleFunc("GET /healthz", handleHealth)
+	// More specific than the file server below it, so these two win: the
+	// marker file gets our landmarks merged in, and the icon they use is
+	// served from the binary rather than from squaremap's directory.
+	mux.HandleFunc("GET /mapa/tiles/{world}/markers.json", handleMarkers(mapDir))
+	mux.HandleFunc("GET /mapa/images/icon/registered/"+landmarkIcon+".png", handleLandmarkIcon)
 	mux.Handle("GET /mapa/", http.StripPrefix("/mapa/", noIndex(http.FileServer(http.Dir(mapDir)))))
 	mux.HandleFunc("GET /mapa", redirectTo("/mapa/"))
 	mux.HandleFunc("GET /{$}", redirectTo("/mapa/"))

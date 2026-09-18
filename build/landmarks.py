@@ -599,6 +599,31 @@ BUILDS = {"mlyn": mlyn, "chata": chata, "strom": strom,
           "lod": lod, "vzducholod": vzducholod}
 
 
+# --- the map -----------------------------------------------------------------
+
+MARKERS = os.path.join(os.path.dirname(HERE), "admin-api", "landmarks.json")
+
+
+def write_markers():
+    """Write the list the map marks the landmarks with.
+
+    squaremap rewrites its own markers.json whenever it updates, so this is
+    not that file: admin-api merges this one into what it serves. The
+    coordinates are the ones the builds are put up at, so the map and the
+    plan cannot drift apart.
+    """
+    import json
+    out = [dict(name=name, x=SITES[name]["at"][0], z=SITES[name]["at"][1],
+                label=SITES[name]["label"], note=SITES[name]["note"])
+           for name in BUILDS]
+    out.append(dict(name="micov", x=50, z=-63, label="Míčov",
+                    note="kostel sv. Matouše, hřbitov a fara"))
+    with open(MARKERS, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    print(f"zapsano {len(out)} znacek do {MARKERS}")
+
+
 def main():
     # The site labels are Czech and the console here is not UTF-8 by default.
     for stream in (sys.stdout, sys.stderr):
@@ -606,7 +631,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("sites", nargs="*", default=list(BUILDS))
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--markers", action="store_true",
+                    help="write the map marker list and build nothing")
     a = ap.parse_args()
+    if a.markers:
+        write_markers()
+        return
     for name in a.sites:
         if name not in BUILDS:
             sys.exit(f"unknown site {name!r}; known: {', '.join(BUILDS)}")
