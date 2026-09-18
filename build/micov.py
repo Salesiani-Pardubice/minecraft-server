@@ -108,7 +108,7 @@ TRACK = [(-30, -52), (-28, -32), (-27, -12), (-26, 6), (-24, 14)]
 # It starts at the gate in the railing, not in the garden: inside the plot
 # the way is paved (GARDEN_WALK), and cutting the corner from the lawn ran
 # the track straight through the parish house.
-WALK = [(46, -3), (40, -3), (34, -3), (27, -3), (24, -3),
+WALK = [(46, -3), (44, -1), (38, -1), (30, -2), (24, -3),
         GATE_E, (12, -13), (0, -14), (-12, -13), (-18, -9), (-18, -2),
         (-16, -1)]
 
@@ -123,11 +123,13 @@ SPAWN = (63, -17)                               # the garden, between the three
 
 # The stone wall along the north-west boundary, broken in places. The pergola
 # runs up against the middle stretch, which is why that one is dead straight.
-STONE_WALL = [[(43, -3), (50, -13), (55, -19)],
+STONE_WALL = [[(42, -4), (46, -12), (52, -20)],
               [(58, -26), (67, -26)],
-              [(71, -33), (81, -41)]]
-# Between the corner of the house and the wall stands a metal railing.
-RAILING = [(50, -3), (44, -3)]
+              [(68, -38), (74, -44), (82, -46)]]
+# Between the corner of the house and the wall stands a metal railing, with
+# the way through the plot crossing it at the gate.
+RAILING = [(50, -3), (43, -3)]
+CROSS = (24, 1)                 # the crucifix at the fork, clear of the lane
 
 ORCHARD = (0, -60, 40, -40)                     # ovocná zahrada, u1 v1 u2 v2
 FIRE = (16, -50)
@@ -137,8 +139,14 @@ FIRE = (16, -50)
 # on the ground, and next time it is read as the ground, so every rebuild
 # would raise it another course - which is how the parish wall reached five
 # and the wayside cross ended up hanging twenty blocks in the air.
+PAVED = frozenset(("dirt_path", "gravel", "coarse_dirt"))
+# Andesite is deliberately absent: it is our paving, but it also occurs in
+# natural bands underground, and treating it as masonry made the survey fall
+# through one - reporting ground twelve blocks down, where the clearing pass
+# then dug a pit. Paving is ground anyway; only what stands on the ground
+# belongs here.
 BUILT = frozenset((
-    "smooth_sandstone", "andesite", "polished_andesite", "cobblestone",
+    "smooth_sandstone", "polished_andesite", "cobblestone",
     "cobblestone_wall", "cobblestone_slab", "bricks", "brick_stairs",
     "stone_bricks", "stone_brick_wall", "mossy_cobblestone", "smooth_stone",
     "smooth_quartz", "deepslate_tiles", "deepslate_tile_stairs",
@@ -162,6 +170,26 @@ def survey(radius=95, bare=True):
     grid = ground_grid((ORIGIN[0] + 22, ORIGIN[1] - 18), radius,
                        extra_cover=BUILT if bare else ())
     return {(x - ORIGIN[0], z - ORIGIN[1]): h for (x, z), h in grid.items()}
+
+
+def finished(grid):
+    """The ground as built: bare terrain, but raised to the levelled pads.
+
+    The survey looks past our own masonry so that nothing grows a course on
+    a rebuild, but that also means it reports the field under a pad rather
+    than the pad. Anything laid on top of the finished ground - the boundary
+    wall, the paving, the lamp posts - has to see the pad, or it is buried
+    by it.
+    """
+    out = dict(grid)
+    for box, y in ((HOUSE, HOUSE_Y), (WING, HOUSE_Y), (WASH, WASH_Y),
+                   (PERGOLA, WASH_Y), (SHOP, SHOP_Y)):
+        for u in range(box["x1"] - 1, box["x2"] + 2):
+            for v in range(box["z1"] - 1, box["z2"] + 2):
+                out[(u, v)] = max(out.get((u, v), y - 1), y - 1)
+    for c in yard_cells():
+        out[c] = max(out.get(c, Y), Y)
+    return out
 
 
 def trace(points, width=0):
@@ -702,7 +730,7 @@ def _follow(s, cells, grid, build, clear=12):
 
 def fara(s, grid=None):
     """The whole parish plot: buildings, the boundary wall and the garden."""
-    grid = grid or survey()
+    grid = finished(grid or survey())
     house(s)
     workshop(s)
     washroom(s)
@@ -730,7 +758,7 @@ def fara(s, grid=None):
 
 def orchard(s, grid=None):
     """Ovocná zahrada: widely spaced trees behind a fence with no way through."""
-    grid = grid or survey()
+    grid = finished(grid or survey())
     u1, v1, u2, v2 = ORCHARD
 
     def post(u, v, y):
@@ -834,7 +862,7 @@ def route(s, grid, points, surface=LANE, width=1, bed="dirt"):
 
 def paths(s, grid=None):
     """The lane, the field track, and the walk from the parish to the porch."""
-    grid = grid or survey()
+    grid = finished(grid or survey())
     route(s, grid, LANE_RUN, LANE, width=1)
     route(s, grid, TRACK, "coarse_dirt", width=0)
     # Orange on the map: garden, lane, east gate, north side, west porch.
@@ -848,15 +876,15 @@ def paths(s, grid=None):
     for pts in (GARDEN_WALK, DOOR_SPUR, SHOP_WALK):
         route(s, grid, pts, PAVING, width=0)
     # A wayside cross where the walk leaves the lane, as the map marks it.
-    cy = grid.get((26, -2), Y - 3)
-    s.fill((26, cy + 1, -2), (26, cy + 12, -2), "air")
-    s.fill((25, cy + 1, -2), (27, cy + 4, -2), "air")
-    _cross(s, 26, -2, cy + 1, high=4)
+    cy = grid.get(CROSS, Y - 3)
+    s.fill((CROSS[0] - 1, cy + 1, CROSS[1]), (CROSS[0] + 1, cy + 12, CROSS[1]),
+           "air")
+    _cross(s, CROSS[0], CROSS[1], cy + 1, high=4)
 
 
 def lights(s, grid=None):
     """Lanterns on posts along the ways, and hung inside the church."""
-    grid = grid or survey()
+    grid = finished(grid or survey())
     for pts in (WALK, GARDEN_WALK):
         line = _line(pts)
         ys = _profile(line, grid)
@@ -893,7 +921,7 @@ def lights(s, grid=None):
 
 def spawn(s, grid=None):
     """Players arrive on the parish lawn, between house, washroom and workshop."""
-    grid = grid or survey()
+    grid = finished(grid or survey())
     su, sv = SPAWN
     y = grid.get(SPAWN, HOUSE_Y - 1)
     s.fill((su - 4, y, sv - 4), (su + 4, y, sv + 4), "grass_block")
@@ -901,6 +929,111 @@ def spawn(s, grid=None):
     s.fill((su - 1, y, sv - 1), (su + 1, y, sv + 1), PAVING)
     s.raw(f"setworldspawn {ORIGIN[0] + su} {y + 1} {ORIGIN[1] + sv}")
     s.raw("gamerule spawnRadius 3")
+
+
+def planned():
+    """Every cell the plan puts something on."""
+    ok = set()
+    for b in (NAVE, TOWER, PORCH, ALTAR_S, ALTAR_N, SACRIST,
+              HOUSE, WING, WASH, PERGOLA, SHOP):
+        for u in range(b["x1"] - 1, b["x2"] + 2):
+            for v in range(b["z1"] - 1, b["z2"] + 2):
+                ok.add((u, v))
+    ok |= yard_cells()
+    for run in STONE_WALL:
+        ok |= trace(run, width=1)
+    ok |= trace(RAILING, width=1)
+    for pts, w in ((WALK, 2), (GARDEN_WALK, 1), (DOOR_SPUR, 1), (SHOP_WALK, 1),
+                   (LANE_RUN, 2), (TRACK, 1)):
+        ok |= trace(pts, width=w)
+    for c, r in ((CROSS, 1), (FIRE, 3), (GARDEN_TREE, 3), (SPAWN, 5)):
+        ok |= {(c[0] + du, c[1] + dv)
+               for du in range(-r, r + 1) for dv in range(-r, r + 1)}
+    ok |= trace([(u, v) for u, v in _perimeter(ORCHARD)], width=1) if False else \
+        {(u + du, v + dv) for u, v in _perimeter(ORCHARD)
+         for du in (-1, 0, 1) for dv in (-1, 0, 1)}
+    return ok
+
+
+def fill_holes(s, grid, rounds=8):
+    """Fill in pits we dug, working in from their rims.
+
+    A cell that sits three or more below the median of its neighbours is not
+    landscape, it is damage; filling the rim and repeating walks the repair
+    inwards. Broad natural hollows have neighbours at their own level, so
+    they are left alone.
+    """
+    keep_out = yard_cells()
+    for b in (HOUSE, WING, WASH, PERGOLA, SHOP):
+        for u in range(b["x1"] - 1, b["x2"] + 2):
+            for v in range(b["z1"] - 1, b["z2"] + 2):
+                keep_out.add((u, v))
+    work = dict(grid)
+    filled = 0
+    for _ in range(rounds):
+        todo = []
+        for (u, v), y in work.items():
+            if (u, v) in keep_out:
+                continue
+            ring = [work.get((u + du, v + dv))
+                    for du in (-1, 0, 1) for dv in (-1, 0, 1) if (du, dv) != (0, 0)]
+            ring = sorted(h for h in ring if h is not None)
+            if len(ring) < 6:
+                continue
+            med = ring[len(ring) // 2]
+            if med - y >= 3:
+                todo.append((u, v, y, med - 1))
+        if not todo:
+            break
+        for u, v, y, tgt in todo:
+            s.fill((u, y + 1, v), (u, tgt, v), "dirt")
+            s.block((u, tgt, v), "grass_block")
+            work[(u, v)] = tgt
+            filled += 1
+    return filled
+
+
+def tidy(s, grid=None):
+    """Take down whatever the plan no longer puts there.
+
+    Moving a wall or a path leaves the old one standing, and hunting the
+    leftovers by hand after every change does not scale. Three readings of
+    the ground answer it: the terrain, the terrain plus our masonry, and the
+    terrain with the paving stripped too.
+    """
+    bare = grid or survey()
+    fin = finished(bare)
+    built = {(x - ORIGIN[0], z - ORIGIN[1]): h for (x, z), h in
+             ground_grid((ORIGIN[0] + 22, ORIGIN[1] - 18), 95).items()}
+    soil = {(x - ORIGIN[0], z - ORIGIN[1]): h for (x, z), h in
+            ground_grid((ORIGIN[0] + 22, ORIGIN[1] - 18), 95,
+                        extra_cover=BUILT | PAVED).items()}
+    ok = planned()
+    u1, v1, u2, v2 = -35, -62, 90, 22
+    holes = fill_holes(s, {c: h for c, h in bare.items()
+                           if u1 <= c[0] <= u2 and v1 <= c[1] <= v2})
+    roofed = set()
+    for b in (NAVE, TOWER, PORCH, ALTAR_S, ALTAR_N, SACRIST,
+              HOUSE, WING, WASH, PERGOLA, SHOP):
+        for u in range(b["x1"] - 1, b["x2"] + 2):
+            for v in range(b["z1"] - 1, b["z2"] + 2):
+                roofed.add((u, v))
+    masonry = paving = 0
+    for (u, v), y in sorted(fin.items()):
+        if not (u1 <= u <= u2 and v1 <= v <= v2) or (u, v) in roofed:
+            continue
+        top = built.get((u, v))
+        # Off the plan, nothing of ours belongs above the ground at all; on
+        # it, nothing stands higher than a cross or a lamp post.
+        floor = y if (u, v) not in ok else y + 6
+        if top is not None and top > floor:
+            s.fill((u, floor + 1, v), (u, top, v), "air")
+            masonry += 1
+        if (u, v) not in ok and soil.get((u, v), y) < y:
+            s.block((u, y, v), "grass_block")
+            paving += 1
+    print(f"   uklizeno: {masonry} sloupcu zdiva, {paving} dlazby, "
+          f"{holes} zasypanych der")
 
 
 # --- clearing the first attempt ----------------------------------------------
@@ -937,7 +1070,7 @@ def demolish(s, grid=None):
     w.flush(dry_run=getattr(s, "dry_run", False))
 
 
-STAGES = {"demolish": demolish, "terrain": terrain, "church": lambda s, g=None: church(s),
+STAGES = {"demolish": demolish, "tidy": tidy, "terrain": terrain, "church": lambda s, g=None: church(s),
           "graveyard": lambda s, g=None: graveyard(s), "fara": fara,
           "orchard": orchard, "paths": paths, "lights": lights, "spawn": spawn}
 
@@ -945,7 +1078,7 @@ STAGES = {"demolish": demolish, "terrain": terrain, "church": lambda s, g=None: 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("stages", nargs="*",
-                    default=[k for k in STAGES if k != "demolish"])
+                    default=[k for k in STAGES if k not in ("demolish", "tidy")])
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--force", action="store_true",
                     help="level even where something is standing, taking it down")
