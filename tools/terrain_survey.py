@@ -10,6 +10,7 @@ Usage:  terrain_survey.py [--centre X Z] [--radius N] [--footprint W D]
 """
 
 import argparse
+import statistics
 import pathlib
 import struct
 import zlib
@@ -153,11 +154,63 @@ def flattest(grid, centre, radius, w, d):
     return best
 
 
+def prominent(grid, centre, radius, w, d, ring=16, step=2):
+    """Rank sites by how far they stand above the surrounding terrain.
+
+    `flattest` finds where least earth has to move; this finds where a build
+    will be *seen* from. The two rarely agree - a hilltop worth putting a
+    cottage on usually needs its top levelling first, which is what the
+    `level` column reports.
+    """
+    cx0, cz0 = centre
+    out = []
+    for x in range(cx0 - radius, cx0 + radius - w, step):
+        for z in range(cz0 - radius, cz0 + radius - d, step):
+            foot = [grid.get((x + i, z + j)) for i in range(w) for j in range(d)]
+            if any(h is None for h in foot):
+                continue
+            cx, cz = x + w // 2, z + d // 2
+            skirt = [grid.get((cx + dx, cz + dz))
+                     for dx in range(-ring, ring + 1)
+                     for dz in range(-ring, ring + 1)
+                     if max(abs(dx), abs(dz)) > ring - 3]
+            skirt = [h for h in skirt if h is not None]
+            if len(skirt) < 40:
+                continue
+            top = statistics.median(foot)
+            out.append((top - statistics.median(skirt), top,
+                        max(foot) - min(foot), x, z,
+                        abs(cx - cx0) + abs(cz - cz0)))
+    out.sort(reverse=True)
+    return out
+
+
+def render(grid, centre, half):
+    """A quick text relief map, for eyeballing what the numbers describe."""
+    cx, cz = centre
+    ramp = " .:-=+*#%@"
+    hs = [h for (x, z), h in grid.items()
+          if abs(x - cx) < half and abs(z - cz) < half]
+    lo, hi = min(hs), max(hs)
+    print(f"  relief around ({cx}, {cz}) - north up, west left, "
+          f"'{ramp[0]}'={lo} to '{ramp[-1]}'={hi}\n")
+    for z in range(cz - half, cz + half):
+        row = "".join(
+            " " if grid.get((x, z)) is None
+            else ramp[min(9, (grid[(x, z)] - lo) * 10 // max(1, hi - lo + 1))]
+            for x in range(cx - half, cx + half))
+        print("   " + row)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--centre", nargs=2, type=int, default=[0, 0], metavar=("X", "Z"))
     ap.add_argument("--radius", type=int, default=64)
     ap.add_argument("--footprint", nargs=2, type=int, metavar=("W", "D"))
+    ap.add_argument("--hilltop", action="store_true",
+                    help="rank by prominence above surroundings, not flatness")
+    ap.add_argument("--map", type=int, metavar="HALF",
+                    help="print a text relief map of this half-width")
     a = ap.parse_args()
 
     grid = build_grid(tuple(a.centre), a.radius)
@@ -169,13 +222,24 @@ def main():
           f"({a.centre[0]}, {a.centre[1]})")
     print(f"  height range : {hs[0]} to {hs[-1]}  (median {hs[len(hs)//2]})")
 
-    if a.footprint:
+    if a.footprint and a.hilltop:
+        w, d = a.footprint
+        print(f"\nMost prominent {w}x{d} sites:\n")
+        print(f"  {'corner':>14}  {'top':>4}  {'above':>6}  {'level':>5}  {'dist':>4}")
+        for pro, top, spread, x, z, dist in prominent(
+                grid, tuple(a.centre), a.radius, w, d)[:8]:
+            print(f"  {x:>6},{z:>6}  {top:>4.0f}  {pro:>6.1f}  {spread:>5}  {dist:>4}")
+    elif a.footprint:
         w, d = a.footprint
         results = flattest(grid, tuple(a.centre), a.radius, w, d)
         print(f"\nFlattest {w}x{d} sites (spread = highest minus lowest):\n")
         print(f"  {'corner':>14}  {'spread':>6}  {'floor':>5}  {'dist':>4}")
         for spread, dist, x, z, lo, hi, med in results[:8]:
             print(f"  {x:>6},{z:>6}  {spread:>6}  {med:>5}  {dist:>4}")
+
+    if a.map:
+        print()
+        render(grid, tuple(a.centre), a.map)
 
 
 if __name__ == "__main__":
