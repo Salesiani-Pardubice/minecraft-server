@@ -37,24 +37,26 @@ FLOOR       = "polished_andesite"
 DOWN_N, DOWN_S = "north", "south"
 
 # --- geometry ---------------------------------------------------------------
+# Footprint traced from the annotated map: a cruciform plan, not a plain nave.
+# The tower stands at the south-west corner with the entrance porch on the west
+# gable beside it; a pair of side-altar chapels face each other across the nave
+# and the sacristy adjoins the northern one on its east side.
 Y     = 89                              # churchyard level
-PAD   = (-36, -4, -8, 30)               # flat ground: x1, z1, x2, z2
+PAD   = (-42, -2, -6, 26)               # flat ground: x1, z1, x2, z2
 BLEND = 14                              # blocks over which the cut eases out
 
-# Nave running east-west, centred on the knoll.
-NAVE  = dict(x1=-32, x2=-12, z1=4, z2=18)
-# Tower stands against the south wall near the east end, over the entrance -
-# not on the nave axis.
-TOWER = dict(x1=-18, x2=-12, z1=18, z2=24)
-PORCH = dict(x1=-17, x2=-13, z1=24, z2=26)
-# Sacristy: a lower annexe on the north side, deliberately well below the nave.
-ANNEX = dict(x1=-20, x2=-12, z1=0, z2=4)
+NAVE    = dict(x1=-36, x2=-9,  z1=6,  z2=15)   # 1. hlavní loď
+TOWER   = dict(x1=-36, x2=-32, z1=16, z2=20)   # 2. věž, jihozápad
+PORCH   = dict(x1=-39, x2=-37, z1=9,  z2=12)   # 3. předsíň se vchodem, západ
+ALTAR_S = dict(x1=-23, x2=-16, z1=16, z2=21)   # 4. boční oltář k jihu
+ALTAR_N = dict(x1=-23, x2=-16, z1=1,  z2=6)    # 5. boční oltář k severu
+SACRIST = dict(x1=-15, x2=-11, z1=1,  z2=6)    # 6. sakristie
 
-WALL_TOP  = Y + 8
-RIDGE     = Y + 15
-ANNEX_TOP = Y + 5
-TOWER_TOP = Y + 18
-SPIRE_TOP = TOWER_TOP + 11
+WALL_TOP   = Y + 8          # nave eaves
+CHAPEL_TOP = Y + 7          # side altars sit just under the nave
+SACRIST_TOP = Y + 5         # sacristy lower again
+TOWER_TOP  = Y + 18
+SPIRE_TOP  = TOWER_TOP + 11
 
 
 def load_heights():
@@ -124,70 +126,105 @@ def _shell(s, b, top, wall, floor_y=None):
                (b["x2"] - 1, floor_y, b["z2"] - 1), FLOOR)
 
 
+def _gable(s, b, eaves, along):
+    """A pitched roof over b, ridge running along 'x' or 'z'.
+
+    Courses are laid from both eaves inwards until they meet, so the pitch is
+    45 degrees and the ridge lands wherever the span puts it.
+    """
+    if along == "x":
+        lo, hi, fixed = b["z1"], b["z2"], (b["x1"], b["x2"])
+    else:
+        lo, hi, fixed = b["x1"], b["x2"], (b["z1"], b["z2"])
+    for i in range((hi - lo) // 2 + 2):
+        y = eaves + 1 + i
+        a, c = lo + i, hi - i
+        if a > c:
+            break
+        if along == "x":
+            s.fill((fixed[0], y, a), (fixed[1], y, a), f"{ROOF_STAIR}[facing={DOWN_N}]")
+            s.fill((fixed[0], y, c), (fixed[1], y, c), f"{ROOF_STAIR}[facing={DOWN_S}]")
+            if a + 1 <= c - 1:
+                s.fill((fixed[0], y, a + 1), (fixed[1], y, c - 1), "air")
+        else:
+            s.fill((a, y, fixed[0]), (a, y, fixed[1]), f"{ROOF_STAIR}[facing=west]")
+            s.fill((c, y, fixed[0]), (c, y, fixed[1]), f"{ROOF_STAIR}[facing=east]")
+            if a + 1 <= c - 1:
+                s.fill((a + 1, y, fixed[0]), (c - 1, y, fixed[1]), "air")
+    return y
+
+
+def _fill_gable_end(s, b, eaves, along, wall):
+    """Close the triangular ends under a pitched roof."""
+    if along == "x":
+        lo, hi = b["z1"], b["z2"]
+        for i in range((hi - lo) // 2 + 2):
+            a, c = lo + i, hi - i
+            if a > c:
+                break
+            for x in (b["x1"], b["x2"]):
+                s.fill((x, eaves + i, a), (x, eaves + i, c), wall)
+    else:
+        lo, hi = b["x1"], b["x2"]
+        for i in range((hi - lo) // 2 + 2):
+            a, c = lo + i, hi - i
+            if a > c:
+                break
+            for z in (b["z1"], b["z2"]):
+                s.fill((a, eaves + i, z), (c, eaves + i, z), wall)
+
+
 def church(s):
-    n, t, p, a = NAVE, TOWER, PORCH, ANNEX
+    n, t, p = NAVE, TOWER, PORCH
+    aS, aN, sac = ALTAR_S, ALTAR_N, SACRIST
     cz = (n["z1"] + n["z2"]) // 2
 
+    # 1. Nave.
     _shell(s, n, WALL_TOP, RENDER, floor_y=Y)
+    _fill_gable_end(s, n, WALL_TOP + 1, "x", RENDER)
+    _gable(s, n, WALL_TOP, "x")
 
-    # Buttresses punctuating both long walls.
-    for x in range(n["x1"] + 2, n["x2"] - 1, 4):
+    # Buttresses and pointed lights along both long walls.
+    for x in range(n["x1"] + 3, n["x2"] - 1, 4):
         for z, dz in ((n["z1"], -1), (n["z2"], 1)):
             s.fill((x, Y, z + dz), (x, WALL_TOP - 1, z + dz), DRESSING)
-
-    # Pointed lights between them.
-    for x in range(n["x1"] + 4, n["x2"] - 2, 4):
+    for x in range(n["x1"] + 5, n["x2"] - 2, 4):
         for z in (n["z1"], n["z2"]):
-            s.fill((x, Y + 4, z), (x + 1, Y + 7, z), GLASS)
-            s.fill((x, Y + 8, z), (x + 1, Y + 8, z), DRESSING)
+            s.fill((x, Y + 4, z), (x, Y + 7, z), GLASS)
+            s.block((x, Y + 8, z), DRESSING)
 
-    # West gable and its rose window.
-    gx = n["x1"]
-    for i in range(8):
-        zi, zo = n["z1"] + i, n["z2"] - i
-        if zi > zo:
-            break
-        s.fill((gx, WALL_TOP + i, zi), (gx, WALL_TOP + i, zo), RENDER)
-    s.fill((gx, WALL_TOP + 2, cz - 1), (gx, WALL_TOP + 4, cz + 1), GLASS)
-    s.block((gx, WALL_TOP + 3, cz), DRESSING)
+    # Rose window in the east gable, opposite the entrance.
+    s.fill((n["x2"], WALL_TOP + 2, cz - 1), (n["x2"], WALL_TOP + 4, cz + 1), GLASS)
+    s.block((n["x2"], WALL_TOP + 3, cz), DRESSING)
 
-    # Nave roof.
-    for i in range(8):
-        y = WALL_TOP + 1 + i
-        zn, zs = n["z1"] + i, n["z2"] - i
-        if zn > zs:
-            break
-        s.fill((n["x1"], y, zn), (n["x2"], y, zn), f"{ROOF_STAIR}[facing={DOWN_N}]")
-        s.fill((n["x1"], y, zs), (n["x2"], y, zs), f"{ROOF_STAIR}[facing={DOWN_S}]")
-        if zn + 1 <= zs - 1:
-            s.fill((n["x1"], y, zn + 1), (n["x2"], y, zs - 1), "air")
-    s.fill((n["x1"], RIDGE, cz), (n["x2"], RIDGE, cz), ROOF)
+    # 4. + 5. Side altars, facing each other; ridges run north-south.
+    for chapel, open_z in ((aS, n["z2"]), (aN, n["z1"])):
+        _shell(s, chapel, CHAPEL_TOP, RENDER, floor_y=Y)
+        _fill_gable_end(s, chapel, CHAPEL_TOP + 1, "z", RENDER)
+        _gable(s, chapel, CHAPEL_TOP, "z")
+        far = chapel["z2"] if open_z == n["z1"] else chapel["z1"]
+        s.fill((chapel["x1"] + 2, Y + 3, far), (chapel["x2"] - 2, Y + 6, far), GLASS)
+        # Open the chapel into the nave.
+        s.fill((chapel["x1"] + 2, Y + 1, open_z), (chapel["x2"] - 2, Y + 5, open_z), "air")
 
-    # Sacristy: low annexe on the north side, its ridge well under the nave eaves.
-    _shell(s, a, ANNEX_TOP, RENDER, floor_y=Y)
-    acz = (a["x1"] + a["x2"]) // 2
-    for i in range(3):
-        y = ANNEX_TOP + 1 + i
-        zn, zs = a["z1"] + i, a["z2"] - i
-        if zn > zs:
-            break
-        s.fill((a["x1"], y, zn), (a["x2"], y, zn), f"{ROOF_STAIR}[facing={DOWN_N}]")
-        s.fill((a["x1"], y, zs), (a["x2"], y, zs), f"{ROOF_STAIR}[facing={DOWN_S}]")
-    s.fill((a["x1"] + 2, Y + 2, a["z1"]), (a["x1"] + 3, Y + 4, a["z1"]), GLASS)
-    s.fill((a["x1"] + 3, Y + 1, n["z1"]), (a["x1"] + 4, Y + 3, n["z1"]), "air")
+    # 6. Sacristy, lower again.
+    _shell(s, sac, SACRIST_TOP, RENDER, floor_y=Y)
+    _fill_gable_end(s, sac, SACRIST_TOP + 1, "z", RENDER)
+    _gable(s, sac, SACRIST_TOP, "z")
+    s.fill((sac["x1"] + 1, Y + 2, sac["z1"]), (sac["x2"] - 1, Y + 4, sac["z1"]), GLASS)
+    s.fill((sac["x1"] + 1, Y + 1, n["z1"]), (sac["x2"] - 1, Y + 3, n["z1"]), "air")
 
-    # Tower against the south wall, over the entrance.
+    # 2. Tower at the south-west corner.
     _shell(s, t, TOWER_TOP, RENDER, floor_y=Y)
     for x in (t["x1"], t["x2"]):
         for z in (t["z1"], t["z2"]):
             s.fill((x, Y, z), (x, TOWER_TOP, z), DRESSING)
     tmx, tmz = (t["x1"] + t["x2"]) // 2, (t["z1"] + t["z2"]) // 2
     b1, b2 = TOWER_TOP - 5, TOWER_TOP - 2
-    s.fill((tmx - 1, b1, t["z2"]), (tmx + 1, b2, t["z2"]), GLASS)
-    s.fill((t["x1"], b1, tmz - 1), (t["x1"], b2, tmz + 1), GLASS)
-    s.fill((t["x2"], b1, tmz - 1), (t["x2"], b2, tmz + 1), GLASS)
-    # Open the tower into the nave.
-    s.fill((tmx - 1, Y + 1, n["z2"]), (tmx + 1, Y + 4, n["z2"]), "air")
+    s.fill((tmx, b1, t["z2"]), (tmx, b2, t["z2"]), GLASS)
+    s.fill((t["x1"], b1, tmz), (t["x1"], b2, tmz), GLASS)
+    s.fill((t["x2"], b1, tmz), (t["x2"], b2, tmz), GLASS)
+    s.fill((tmx, Y + 1, t["z1"]), (tmx, Y + 4, t["z1"]), "air")   # into the nave
 
     # Spire.
     x1, x2, z1, z2 = t["x1"], t["x2"], t["z1"], t["z2"]
@@ -200,12 +237,12 @@ def church(s):
     s.fill((tmx, SPIRE_TOP + 2, tmz), (tmx, SPIRE_TOP + 3, tmz), "iron_bars")
     s.fill((tmx, SPIRE_TOP + 3, tmz - 1), (tmx, SPIRE_TOP + 3, tmz + 1), "iron_bars")
 
-    # Entrance porch at the tower foot.
-    s.walls((p["x1"], Y, p["z1"]), (p["x2"], Y + 4, p["z2"]), RENDER)
-    s.fill((p["x1"] + 1, Y, p["z1"]), (p["x2"] - 1, Y + 3, p["z2"] - 1), "air")
-    s.fill((p["x1"], Y + 5, p["z1"]), (p["x2"], Y + 5, p["z2"]), ROOF)
-    s.fill((p["x1"] + 1, Y + 1, p["z2"]), (p["x2"] - 1, Y + 3, p["z2"]), "air")
-    s.fill((p["x1"] + 1, Y + 1, t["z2"]), (p["x2"] - 1, Y + 3, t["z2"]), "air")
+    # 3. Entrance porch on the west gable.
+    _shell(s, p, Y + 4, RENDER)
+    _fill_gable_end(s, p, Y + 5, "z", RENDER)
+    _gable(s, p, Y + 4, "z")
+    s.fill((p["x1"], Y + 1, p["z1"] + 1), (p["x1"], Y + 3, p["z2"] - 1), "air")
+    s.fill((n["x1"], Y + 1, p["z1"] + 1), (n["x1"], Y + 3, p["z2"] - 1), "air")
 
 
 STAGES = {"terrain": terrain, "church": church}
