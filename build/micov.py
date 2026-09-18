@@ -32,9 +32,12 @@ SPIRE       = "oxidized_copper"
 GLASS       = "black_stained_glass_pane"
 FLOOR       = "polished_andesite"
 
-# Facing for a roof stair where the surface descends towards -z / +z.
-# Flip these two if the pitch comes out inverted.
-DOWN_N, DOWN_S = "north", "south"
+# Stair facings for a roof course, by which side of the ridge it is on.
+# A stair "faces" the direction it descends towards, which is the opposite of
+# what reads naturally when writing the loop - the first attempt had every
+# pitch inverted, and an inverted pitch leaks rain.
+DOWN_N, DOWN_S = "south", "north"
+DOWN_W, DOWN_E = "east", "west"
 
 # --- geometry ---------------------------------------------------------------
 # Footprint traced from the annotated map: a cruciform plan, not a plain nave.
@@ -42,8 +45,8 @@ DOWN_N, DOWN_S = "north", "south"
 # gable beside it; a pair of side-altar chapels face each other across the nave
 # and the sacristy adjoins the northern one on its east side.
 Y     = 89                              # churchyard level
-PAD   = (-42, -2, -6, 26)               # flat ground: x1, z1, x2, z2
-BLEND = 14                              # blocks over which the cut eases out
+PAD   = (-44, -4, -4, 28)               # flat ground: x1, z1, x2, z2
+BLEND = 26                              # blocks over which the cut eases out
 
 NAVE    = dict(x1=-36, x2=-9,  z1=6,  z2=15)   # 1. hlavní loď
 TOWER   = dict(x1=-36, x2=-32, z1=16, z2=20)   # 2. věž, jihozápad
@@ -52,21 +55,20 @@ ALTAR_S = dict(x1=-23, x2=-16, z1=16, z2=21)   # 4. boční oltář k jihu
 ALTAR_N = dict(x1=-23, x2=-16, z1=1,  z2=6)    # 5. boční oltář k severu
 SACRIST = dict(x1=-15, x2=-11, z1=1,  z2=6)    # 6. sakristie
 
-WALL_TOP   = Y + 8          # nave eaves
-CHAPEL_TOP = Y + 7          # side altars sit just under the nave
-SACRIST_TOP = Y + 5         # sacristy lower again
-TOWER_TOP  = Y + 18
-SPIRE_TOP  = TOWER_TOP + 11
+WALL_TOP    = Y + 11        # nave eaves
+CHAPEL_TOP  = Y + 9         # side altars sit just under the nave
+SACRIST_TOP = Y + 7         # sacristy lower again
+PORCH_TOP   = Y + 5
+TOWER_TOP   = Y + 22
+SPIRE_TOP   = TOWER_TOP + 6
 
 
 def load_heights():
     """Surface heights around the site, read from the region files."""
     subprocess.run(["docker", "exec", "-i", "minecraft-server", "rcon-cli",
                     "save-all flush"], capture_output=True, text=True)
-    cx = (PAD[0] + PAD[2]) // 2
-    cz = (PAD[1] + PAD[3]) // 2
-    radius = max(PAD[2] - PAD[0], PAD[3] - PAD[1]) // 2 + BLEND + 6
-    return build_grid((cx, cz), radius)
+    # Wide enough to cover spawn, the church, and the route between them.
+    return build_grid((-24, 8), 60)
 
 
 def target_height(x, z, grid):
@@ -129,29 +131,46 @@ def _shell(s, b, top, wall, floor_y=None):
 def _gable(s, b, eaves, along):
     """A pitched roof over b, ridge running along 'x' or 'z'.
 
-    Courses are laid from both eaves inwards until they meet, so the pitch is
-    45 degrees and the ridge lands wherever the span puts it.
+    Courses are laid inward from both eaves. The last one or two courses are
+    solid blocks rather than stairs: a pair of opposing stairs meeting at the
+    apex leaves a hole, which is how rain gets in.
     """
     if along == "x":
-        lo, hi, fixed = b["z1"], b["z2"], (b["x1"], b["x2"])
+        lo, hi, f1, f2 = b["z1"], b["z2"], b["x1"], b["x2"]
+        low_face, high_face = DOWN_N, DOWN_S
     else:
-        lo, hi, fixed = b["x1"], b["x2"], (b["z1"], b["z2"])
-    for i in range((hi - lo) // 2 + 2):
-        y = eaves + 1 + i
-        a, c = lo + i, hi - i
+        lo, hi, f1, f2 = b["x1"], b["x2"], b["z1"], b["z2"]
+        low_face, high_face = DOWN_W, DOWN_E
+
+    def row(v, y, block):
+        if along == "x":
+            s.fill((f1, y, v), (f2, y, v), block)
+        else:
+            s.fill((v, y, f1), (v, y, f2), block)
+
+    def clear(a, c, y):
+        if a + 1 > c - 1:
+            return
+        if along == "x":
+            s.fill((f1, y, a + 1), (f2, y, c - 1), "air")
+        else:
+            s.fill((a + 1, y, f1), (c - 1, y, f2), "air")
+
+    i = 0
+    while True:
+        y, a, c = eaves + 1 + i, lo + i, hi - i
         if a > c:
             break
-        if along == "x":
-            s.fill((fixed[0], y, a), (fixed[1], y, a), f"{ROOF_STAIR}[facing={DOWN_N}]")
-            s.fill((fixed[0], y, c), (fixed[1], y, c), f"{ROOF_STAIR}[facing={DOWN_S}]")
-            if a + 1 <= c - 1:
-                s.fill((fixed[0], y, a + 1), (fixed[1], y, c - 1), "air")
-        else:
-            s.fill((a, y, fixed[0]), (a, y, fixed[1]), f"{ROOF_STAIR}[facing=west]")
-            s.fill((c, y, fixed[0]), (c, y, fixed[1]), f"{ROOF_STAIR}[facing=east]")
-            if a + 1 <= c - 1:
-                s.fill((a + 1, y, fixed[0]), (c - 1, y, fixed[1]), "air")
-    return y
+        if c - a <= 1:                       # ridge course, solid
+            row(a, y, ROOF)
+            if c != a:
+                row(c, y, ROOF)
+            break
+        row(a, y, f"{ROOF_STAIR}[facing={low_face}]")
+        row(c, y, f"{ROOF_STAIR}[facing={high_face}]")
+        clear(a, c, y)
+        i += 1
+    return eaves + 1 + i
 
 
 def _fill_gable_end(s, b, eaves, along, wall):
@@ -238,14 +257,128 @@ def church(s):
     s.fill((tmx, SPIRE_TOP + 3, tmz - 1), (tmx, SPIRE_TOP + 3, tmz + 1), "iron_bars")
 
     # 3. Entrance porch on the west gable.
-    _shell(s, p, Y + 4, RENDER)
-    _fill_gable_end(s, p, Y + 5, "z", RENDER)
-    _gable(s, p, Y + 4, "z")
+    _shell(s, p, PORCH_TOP, RENDER)
+    _fill_gable_end(s, p, PORCH_TOP + 1, "z", RENDER)
+    _gable(s, p, PORCH_TOP, "z")
     s.fill((p["x1"], Y + 1, p["z1"] + 1), (p["x1"], Y + 3, p["z2"] - 1), "air")
     s.fill((n["x1"], Y + 1, p["z1"] + 1), (n["x1"], Y + 3, p["z2"] - 1), "air")
 
 
-STAGES = {"terrain": terrain, "church": church}
+
+# --- the rest of the scene ---------------------------------------------------
+
+SPAWN = (0, 0)                  # world spawn, where the path starts
+# Round the churchyard, then along the south side to the west porch.
+ROUTE = [SPAWN, (-4, 6), (-10, 14), (-18, 24), (-30, 25), (-40, 20), (-41, 11)]
+
+
+def _surface(x, z, grid):
+    """Ground level after the terrace has been cut - the path follows this."""
+    return target_height(x, z, grid)
+
+
+def trees(s):
+    """Scatter oaks over the slope, leaving the churchyard itself clear."""
+    x1, z1, x2, z2 = PAD
+    o = 6                                    # keep this much clear round the pad
+    lo_y, hi_y = Y - 34, Y + 8
+    bands = [
+        (x1 - BLEND, z1 - BLEND, x2 + BLEND, z1 - o),      # north
+        (x1 - BLEND, z2 + o,     x2 + BLEND, z2 + BLEND),  # south
+        (x1 - BLEND, z1 - o,     x1 - o,     z2 + o),      # west
+        (x2 + o,     z1 - o,     x2 + BLEND, z2 + o),      # east
+    ]
+    for bx1, bz1, bx2, bz2 in bands:
+        s.sel((bx1, lo_y, bz1), (bx2, hi_y, bz2))
+        s.raw("//forest oak 6")
+
+
+def path(s):
+    """A worn track from spawn up to the church door."""
+    grid = load_heights()
+    seen = set()
+    for (ax, az), (bx, bz) in zip(ROUTE, ROUTE[1:]):
+        steps = max(abs(bx - ax), abs(bz - az))
+        for i in range(steps + 1):
+            cx = round(ax + (bx - ax) * i / steps)
+            cz = round(az + (bz - az) * i / steps)
+            for dx in (-1, 0, 1):
+                for dz in (-1, 0, 1):
+                    if abs(dx) + abs(dz) > 1:
+                        continue
+                    x, z = cx + dx, cz + dz
+                    if (x, z) in seen:
+                        continue
+                    seen.add((x, z))
+                    y = _surface(x, z, grid)
+                    if y is None:
+                        continue
+                    s.fill((x, y, z), (x, y, z), "dirt_path")
+                    s.fill((x, y + 1, z), (x, y + 3, z), "air")
+
+
+def spawn(s):
+    """A little well where players arrive, so spawn is somewhere, not nowhere."""
+    grid = load_heights()
+    sx, sz = SPAWN
+    y = _surface(sx, sz, grid)
+
+    # A swept apron of stone, and level ground under it.
+    s.fill((sx - 6, y, sz - 6), (sx + 6, y, sz + 6), "grass_block")
+    s.fill((sx - 6, y + 1, sz - 6), (sx + 6, y + 6, sz + 6), "air")
+    s.fill((sx - 4, y, sz - 4), (sx + 4, y, sz + 4), "andesite")
+    s.fill((sx - 3, y, sz - 3), (sx + 3, y, sz + 3), "polished_andesite")
+
+    # The well itself: a cobble ring round a column of water.
+    s.walls((sx - 1, y + 1, sz - 1), (sx + 1, y + 2, sz + 1), "cobblestone")
+    s.fill((sx, y - 3, sz), (sx, y + 1, sz), "water")
+    for dx, dz in ((-1, -1), (-1, 1), (1, -1), (1, 1)):
+        s.fill((sx + dx, y + 3, sz + dz), (sx + dx, y + 4, sz + dz), "oak_fence")
+    s.fill((sx - 1, y + 5, sz - 1), (sx + 1, y + 5, sz + 1), "oak_planks")
+    s.fill((sx - 2, y + 5, sz - 2), (sx + 2, y + 5, sz + 2), "oak_slab")
+    s.block((sx, y + 6, sz), "lantern")
+
+    # A bench of steps to sit on, facing the church.
+    s.fill((sx - 3, y + 1, sz + 3), (sx + 3, y + 1, sz + 3), "cobblestone_slab")
+
+
+def lights(s):
+    """Lanterns on posts along the route, and inside the church."""
+    grid = load_heights()
+
+    placed = 0
+    for (ax, az), (bx, bz) in zip(ROUTE, ROUTE[1:]):
+        steps = max(abs(bx - ax), abs(bz - az))
+        for i in range(0, steps + 1, 9):
+            cx = round(ax + (bx - ax) * i / steps)
+            cz = round(az + (bz - az) * i / steps)
+            x, z = cx + 2, cz + 2            # just off the path edge
+            y = _surface(x, z, grid)
+            if y is None:
+                continue
+            s.fill((x, y + 1, z), (x, y + 3, z), "oak_fence")
+            s.block((x, y + 4, z), "lantern")
+            placed += 1
+
+    n, t = NAVE, TOWER
+    # Nave: a lantern hung between each pair of buttresses.
+    for x in range(n["x1"] + 5, n["x2"] - 2, 4):
+        s.block((x, WALL_TOP - 2, (n["z1"] + n["z2"]) // 2), "lantern[hanging=true]")
+    # Chapels, sacristy, porch and the tower stair.
+    for b, y in ((ALTAR_S, CHAPEL_TOP - 2), (ALTAR_N, CHAPEL_TOP - 2),
+                 (SACRIST, SACRIST_TOP - 2), (PORCH, PORCH_TOP - 1)):
+        s.block(((b["x1"] + b["x2"]) // 2, y, (b["z1"] + b["z2"]) // 2),
+                "lantern[hanging=true]")
+    s.block(((t["x1"] + t["x2"]) // 2, Y + 5, (t["z1"] + t["z2"]) // 2),
+            "lantern[hanging=true]")
+    # Two lanterns flanking the porch door outside.
+    for dz in (-1, 1):
+        s.block((PORCH["x1"] - 1, Y + 3, (PORCH["z1"] + PORCH["z2"]) // 2 + dz),
+                "lantern")
+
+
+STAGES = {"terrain": terrain, "trees": trees, "church": church,
+          "path": path, "spawn": spawn, "lights": lights}
 
 
 def main():
