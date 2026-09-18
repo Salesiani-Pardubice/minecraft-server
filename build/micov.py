@@ -105,7 +105,10 @@ LANE_RUN = [(-45, -64), (-30, -52), (-8, -38), (12, -24), (24, -10),
 TRACK = [(-30, -52), (-28, -32), (-27, -12), (-26, 6), (-24, 14)]
 # Orange on the map: out of the parish garden, over the lane, in at the east
 # gate, along the north side of the church and round to the west porch.
-WALK = [(64, -17), (58, -13), (50, -9), (40, -5), (30, -3), (24, -3),
+# It starts at the gate in the railing, not in the garden: inside the plot
+# the way is paved (GARDEN_WALK), and cutting the corner from the lawn ran
+# the track straight through the parish house.
+WALK = [(46, -3), (40, -3), (34, -3), (27, -3), (24, -3),
         GATE_E, (12, -13), (0, -14), (-12, -13), (-18, -9), (-18, -2),
         (-16, -1)]
 
@@ -115,7 +118,7 @@ WING   = dict(x1=50, x2=57, z1=-3,  z2=3)       # její křídlo
 WASH   = dict(x1=66, x2=73, z1=-26, z2=-20)     # umývárna
 PERGOLA = dict(x1=58, x2=65, z1=-26, z2=-20)    # pergola, navazuje na zídku
 SHOP   = dict(x1=72, x2=80, z1=-40, z2=-32)     # dílna
-GARDEN_TREE = (56, -15)
+GARDEN_TREE = (54, -19)
 SPAWN = (63, -17)                               # the garden, between the three
 
 # The stone wall along the north-west boundary, broken in places. The pergola
@@ -726,9 +729,9 @@ def orchard(s, grid=None):
 
 # --- ways --------------------------------------------------------------------
 
-GARDEN_WALK = [(44, -3), (48, -6), (48, -16), (58, -17), (63, -17)]
+GARDEN_WALK = [(46, -3), (48, -6), (48, -16), (58, -17), (63, -17)]
 DOOR_SPUR   = [(59, -17), (59, -15)]
-SHOP_WALK   = [(63, -17), (70, -19), (75, -24), (76, -31)]
+SHOP_WALK   = [(63, -17), (72, -17), (77, -22), (77, -30), (76, -31)]
 
 
 def _profile(line, grid):
