@@ -133,11 +133,34 @@ ORCHARD = (0, -60, 40, -40)                     # ovocná zahrada, u1 v1 u2 v2
 FIRE = (16, -50)
 
 
-def survey(radius=95):
-    """Ground level over the whole village, in local coordinates."""
+# What we put up ourselves. The survey has to look past it: a wall is built
+# on the ground, and next time it is read as the ground, so every rebuild
+# would raise it another course - which is how the parish wall reached five
+# and the wayside cross ended up hanging twenty blocks in the air.
+BUILT = frozenset((
+    "smooth_sandstone", "andesite", "polished_andesite", "cobblestone",
+    "cobblestone_wall", "cobblestone_slab", "bricks", "brick_stairs",
+    "stone_bricks", "stone_brick_wall", "mossy_cobblestone", "smooth_stone",
+    "smooth_quartz", "deepslate_tiles", "deepslate_tile_stairs",
+    "deepslate_tile_slab", "spruce_planks", "spruce_stairs", "spruce_slab",
+    "oak_planks", "oak_slab", "oak_stairs", "iron_bars", "glass", "glass_pane",
+    "black_stained_glass_pane", "oxidized_copper", "campfire", "water_cauldron",
+    "crafting_table", "smithing_table", "furnace", "blast_furnace", "chest",
+    "barrel", "anvil", "oak_door", "spruce_door", "polished_deepslate",
+))
+
+
+def survey(radius=95, bare=True):
+    """Ground level over the whole village, in local coordinates.
+
+    With bare, the terrain under whatever we have built; without it, the top
+    of what is standing - which is what the terrain stage checks before it
+    levels a site.
+    """
     subprocess.run(["docker", "exec", "-i", "minecraft-server", "rcon-cli",
                     "save-all flush"], capture_output=True, text=True)
-    grid = ground_grid((ORIGIN[0] + 22, ORIGIN[1] - 18), radius)
+    grid = ground_grid((ORIGIN[0] + 22, ORIGIN[1] - 18), radius,
+                       extra_cover=BUILT if bare else ())
     return {(x - ORIGIN[0], z - ORIGIN[1]): h for (x, z), h in grid.items()}
 
 
@@ -241,11 +264,12 @@ def terrain(s, grid=None):
     which is exactly what happened the first time it was run out of order.
     """
     grid = grid or survey()
+    built = survey(bare=False)
     for what, cell, floor in (("church", (NAVE["x1"] + 2, NAVE["z1"]), Y),
                               ("parish house", (HOUSE["x1"] + 2, HOUSE["z1"]),
                                HOUSE_Y),
                               ("workshop", (SHOP["x1"] + 2, SHOP["z1"]), SHOP_Y)):
-        standing = grid.get(cell)
+        standing = built.get(cell)
         if standing is not None and standing > floor + 3 and not FORCE:
             sys.exit(f"terrain: the {what} is standing at this site - "
                      "levelling would cut it down. Run terrain first.")
@@ -661,12 +685,19 @@ def pergola(s):
             "lantern[hanging=true]")
 
 
-def _follow(s, cells, grid, build):
-    """Run `build(u, v, y)` over cells, at whatever height the ground is."""
+def _follow(s, cells, grid, build, clear=12):
+    """Run `build(u, v, y)` over cells, at whatever height the ground is.
+
+    Whatever stood there is taken down first, so running a stage twice
+    rebuilds it rather than adding a course to it.
+    """
     for u, v in sorted(cells):
         y = grid.get((u, v))
-        if y is not None:
-            build(u, v, y)
+        if y is None:
+            continue
+        if clear:
+            s.fill((u, y + 1, v), (u, y + clear, v), "air")
+        build(u, v, y)
 
 
 def fara(s, grid=None):
@@ -692,6 +723,8 @@ def fara(s, grid=None):
 
     # The tree standing in the middle of the plot, towards the garden.
     gy = grid.get(GARDEN_TREE, HOUSE_Y - 1)
+    s.fill((GARDEN_TREE[0] - 3, gy + 1, GARDEN_TREE[1] - 3),
+           (GARDEN_TREE[0] + 3, gy + 12, GARDEN_TREE[1] + 3), "air")
     _tree(s, GARDEN_TREE[0], GARDEN_TREE[1], gy, h=6)
 
 
@@ -720,6 +753,7 @@ def orchard(s, grid=None):
     # Ohniště, with log seats round it.
     fu, fv = FIRE
     fy = grid.get(FIRE, 68)
+    s.fill((fu - 3, fy + 1, fv - 3), (fu + 3, fy + 6, fv + 3), "air")
     s.fill((fu - 2, fy, fv - 2), (fu + 2, fy, fv + 2), "gravel")
     s.fill((fu - 1, fy, fv - 1), (fu + 1, fy, fv + 1), PLINTH)
     s.block((fu, fy, fv), "campfire")
@@ -815,6 +849,8 @@ def paths(s, grid=None):
         route(s, grid, pts, PAVING, width=0)
     # A wayside cross where the walk leaves the lane, as the map marks it.
     cy = grid.get((26, -2), Y - 3)
+    s.fill((26, cy + 1, -2), (26, cy + 12, -2), "air")
+    s.fill((25, cy + 1, -2), (27, cy + 4, -2), "air")
     _cross(s, 26, -2, cy + 1, high=4)
 
 

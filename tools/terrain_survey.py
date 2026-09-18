@@ -154,16 +154,21 @@ SKIP_SUFFIX = ("_leaves", "_log", "_wood", "_sapling", "_tulip", "_mushroom",
                "_sign", "_banner", "_carpet", "_button", "_pressure_plate")
 
 
-def is_cover(name):
-    """True for blocks that sit on the ground rather than being the ground."""
-    return name in SKIP_EXACT or name.endswith(SKIP_SUFFIX)
+def is_cover(name, extra=()):
+    """True for blocks that sit on the ground rather than being the ground.
+
+    `extra` lets a caller add its own masonry: a wall built on the ground
+    becomes the ground next time the survey runs, so anything placed at
+    ground level and rebuilt would climb a course every pass.
+    """
+    return name in SKIP_EXACT or name in extra or name.endswith(SKIP_SUFFIX)
 
 
-def section_lookup(section):
+def section_lookup(section, extra=()):
     """(palette, index_of) for one 16^3 section, or None if it is all cover."""
     bs = section.get("block_states") or {}
     palette = [str(e.get("Name", "")).split(":")[-1] for e in bs.get("palette", [])]
-    if not palette or all(is_cover(n) for n in palette):
+    if not palette or all(is_cover(n, extra) for n in palette):
         return None
     data = bs.get("data")
     if data is None:                       # single-block section
@@ -178,12 +183,12 @@ def section_lookup(section):
     return palette, index_of
 
 
-def chunk_ground(nbt):
+def chunk_ground(nbt, extra=()):
     """Ground height for all 256 columns of a chunk, or None where unknown."""
     cols = [None] * 256
     left = 256
     for sec in sorted(nbt.get("sections") or [], key=lambda s: -s.get("Y", 0)):
-        look = section_lookup(sec)
+        look = section_lookup(sec, extra)
         if look is None:
             continue
         palette, index_of = look
@@ -193,7 +198,7 @@ def chunk_ground(nbt):
             for c in range(256):
                 if cols[c] is not None:
                     continue
-                if not is_cover(palette[index_of(row + c)]):
+                if not is_cover(palette[index_of(row + c)], extra):
                     cols[c] = base + y
                     left -= 1
         if left == 0:
@@ -201,7 +206,7 @@ def chunk_ground(nbt):
     return cols
 
 
-def ground_grid(centre, radius):
+def ground_grid(centre, radius, extra_cover=()):
     """Map every (x, z) in range to the top of the actual ground."""
     cx0, cz0 = centre
     grid = {}
@@ -213,7 +218,7 @@ def ground_grid(centre, radius):
             if (abs(cx * 16 + 8 - cx0) > radius + 16
                     or abs(cz * 16 + 8 - cz0) > radius + 16):
                 continue
-            for i, h in enumerate(chunk_ground(nbt)):
+            for i, h in enumerate(chunk_ground(nbt, extra_cover)):
                 if h is None:
                     continue
                 x, z = cx * 16 + (i % 16), cz * 16 + (i // 16)
